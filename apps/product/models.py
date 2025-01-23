@@ -15,37 +15,11 @@ from io import BytesIO
 from cafe.util import unique_slug_generator
 
 from apps.category.models import Category
-from apps.customer.models import Customer
 from apps.section.models import Section
-from apps.rating.models import Rating
-from django.core.exceptions import ValidationError
 
 
-def validate_file_extension(value, allowed_extensions):
-    ext = value.name.split(".")[-1].lower()
-    if ext not in allowed_extensions:
-        raise ValidationError(
-            _(
-                "Unsupported file extension: %(ext)s. Allowed extensions are: %(allowed_extensions)s"
-            ),
-            params={"ext": ext, "allowed_extensions": ", ".join(allowed_extensions)},
-        )
 
 
-def validate_pdf(value):
-    validate_file_extension(value, ["pdf"])
-
-
-def validate_mp3(value):
-    validate_file_extension(value, ["mp3"])
-
-
-def validate_sib(value):
-    validate_file_extension(value, ["sib"])
-
-
-def validate_midi(value):
-    validate_file_extension(value, ["mid"])
 
 
 def product_image_file_path(instance, filename):
@@ -53,30 +27,6 @@ def product_image_file_path(instance, filename):
     filename = f"{uuid.uuid4()}{ext}"
 
     return os.path.join("uploads", "product", "images", filename)
-
-
-def product_pdf_file_path(instance, filename):
-    ext = os.path.splitext(filename)[1]
-    filename = f"{uuid.uuid4()}{ext}"
-    return os.path.join("uploads", "product", "pdfs", filename)
-
-
-def product_mp3_file_path(instance, filename):
-    ext = os.path.splitext(filename)[1]
-    filename = f"{uuid.uuid4()}{ext}"
-    return os.path.join("uploads", "product", "mp3s", filename)
-
-
-def product_sib_file_path(instance, filename):
-    ext = os.path.splitext(filename)[1]
-    filename = f"{uuid.uuid4()}{ext}"
-    return os.path.join("uploads", "product", "sibs", filename)
-
-
-def product_midi_file_path(instance, filename):
-    ext = os.path.splitext(filename)[1]
-    filename = f"{uuid.uuid4()}{ext}"
-    return os.path.join("uploads", "product", "midis", filename)
 
 
 class Product(models.Model):
@@ -97,12 +47,7 @@ class Product(models.Model):
     name_ar = models.CharField(max_length=255, unique=True)
     slug = models.SlugField(max_length=255, allow_unicode=True, unique=True)
     description = models.TextField(blank=True, null=True)
-    price_pdf = models.DecimalField(
-        max_digits=10, decimal_places=2, blank=True, null=True
-    )
-    price_sib = models.DecimalField(
-        max_digits=10, decimal_places=2, blank=True, null=True
-    )
+
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -123,32 +68,6 @@ class Product(models.Model):
         null=True,
     )
     image = models.ImageField(blank=True, null=True, upload_to=product_image_file_path)
-    note_image = models.ImageField(blank=True, null=True, upload_to=product_image_file_path)
-    pdf_file = models.FileField(
-        blank=True,
-        null=True,
-        upload_to=product_pdf_file_path,
-        validators=[validate_pdf],
-    )
-    mp3_file = models.FileField(
-        blank=True,
-        null=True,
-        upload_to=product_mp3_file_path,
-        validators=[validate_mp3],
-    )
-    sib_file = models.FileField(
-        blank=True,
-        null=True,
-        upload_to=product_sib_file_path,
-        validators=[validate_sib],
-    )
-    midi_file = models.FileField(
-        blank=True,
-        null=True,
-        upload_to=product_midi_file_path,
-        validators=[validate_midi],
-    )
-    views_num = models.PositiveIntegerField(default=0)
 
     def save(self, *args, **kwargs):
         # # Set the price based on the purchase type
@@ -194,39 +113,9 @@ class Product(models.Model):
                     save=True,
                 )
 
-    def increment_views_num(self, customer):
-        from .models import ProductView  # Avoid circular import
-
-        if not ProductView.objects.filter(product=self, customer=customer).exists():
-            ProductView.objects.create(product=self, customer=customer)
-            self.views_num += 1
-            self.save(update_fields=["views_num"])
-
-    def no_of_ratings(self):
-        ratings = Rating.objects.filter(product=self)
-        return len(ratings)
-
-    def avg_ratings(self):
-        sum = 0
-        ratings = Rating.objects.filter(product=self)
-        for i in ratings:
-            sum += i.stars
-        if len(ratings) > 0:
-            return sum / len(ratings)
-        else:
-            return 0
 
 
-class ProductView(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    product = models.ForeignKey(Product, related_name="views", on_delete=models.CASCADE)
-    customer = models.ForeignKey(
-        Customer, related_name="product_views", on_delete=models.CASCADE
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        unique_together = ("product", "customer")
 
 
 @receiver(pre_save, sender=Product)

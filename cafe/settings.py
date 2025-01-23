@@ -40,15 +40,11 @@ INSTALLED_APPS = [
     "djoser",
     "user",
     "apps.permissions_api",
-    "apps.service",
     "apps.category",
     "apps.product",
     "apps.about_us",
     "apps.contact_us",
-    "apps.customer",
     "apps.section",
-    "apps.cart",
-    "apps.rating",
     "apps.order",
 
 ]

@@ -21,15 +21,10 @@ urlpatterns += i18n_patterns(
     ),
     path("api/users/", include("user.urls")),
     path("api/permissions/", include("apps.permissions_api.urls")),
-    path("api/service/", include("apps.service.urls")),
     path("api/category/", include("apps.category.urls")),
     path("api/product/", include("apps.product.urls")),
     path("api/about_us/", include("apps.about_us.urls")),
     path("api/contact_us/", include("apps.contact_us.urls")),
-    path("api/customer/", include("apps.customer.urls")),
-    path("api/section/", include("apps.section.urls")),
-    path("api/cart/", include("apps.cart.urls")),
-    path("api/rating/", include("apps.rating.urls")),
     path("api/order/", include("apps.order.urls")),
 )
 

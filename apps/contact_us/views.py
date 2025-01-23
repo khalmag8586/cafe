@@ -15,7 +15,7 @@ from apps.contact_us.models import ContactUs
 from .serializers import ContactUsSerializer, ContactUsReadSerializer
 
 from cafe.pagination import StandardResultsSetPagination
-from cafe.custom_permissions import CustomerPermission
+from cafe.custom_permissions import  HasPermissionOrInGroupWithPermission
 
 class ContactUSCreateView(generics.CreateAPIView):
     serializer_class = ContactUsSerializer
@@ -34,7 +34,8 @@ class ContactUSCreateView(generics.CreateAPIView):
 class ContactUsListView(generics.ListAPIView):
     serializer_class = ContactUsSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='contact_us.view_contactus'
     queryset = ContactUs.objects.all().order_by("-created_at")
     pagination_class = StandardResultsSetPagination
 
@@ -42,7 +43,8 @@ class ContactUsListView(generics.ListAPIView):
 class ContactUsRetrieveView(generics.RetrieveAPIView):
     serializer_class = ContactUsSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='contact_us.view_contactus'
     lookup_field = "id"
 
     def get_object(self):
@@ -54,7 +56,8 @@ class ContactUsRetrieveView(generics.RetrieveAPIView):
 class ContactUsChangeRead(generics.UpdateAPIView):
     serializer_class = ContactUsReadSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='contact_us.change_contactus'
 
     def get_object(self):
         contactUs_id = self.request.query_params.get("contactUs_id")
@@ -75,7 +78,8 @@ class ContactUsChangeRead(generics.UpdateAPIView):
 
 class ContactUsDeleteView(generics.DestroyAPIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='contact_us.delete_contactus'
 
     def delete(self, request, *args, **kwargs):
         contactUs_ids = request.data.get("contactUs_id", [])

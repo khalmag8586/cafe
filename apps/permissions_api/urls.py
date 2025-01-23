@@ -8,8 +8,10 @@ from apps.permissions_api.views import (
     RemovePermissionsFromUserView,
     # Groups Views
     GroupListView,
+    GroupRetrieveView,
     GroupCreateView,
     GroupUpdateView,
+    GroupUpdatePermissionsView,
     GroupDeleteView,
     AssignUserToGroupView,
     AssignManyUsersToGroupView,
@@ -48,7 +50,13 @@ urlpatterns = [
     # group urls
     path("group_create/", GroupCreateView.as_view(), name="group-create"),
     path("group_list/", GroupListView.as_view(), name="groups-list"),
+    path("group_retrieve/", GroupRetrieveView.as_view(), name="group retrieve"),
     path("group_update/", GroupUpdateView.as_view(), name="group-update"),
+    path(
+        "group_update_permissions/",
+        GroupUpdatePermissionsView.as_view(),
+        name="group-update-permissions",
+    ),
     path("group_delete/", GroupDeleteView.as_view(), name="group-delete"),
     path("group_dialog/", GroupDialogView.as_view(), name="group-dialog"),
     path(

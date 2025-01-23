@@ -27,7 +27,7 @@ from apps.product.serializers import (
 )
 from apps.product.filters import ProductFilter
 from cafe.pagination import StandardResultsSetPagination
-from cafe.custom_permissions import CustomerPermission
+from cafe.custom_permissions import  HasPermissionOrInGroupWithPermission
 
 from apps.category.models import Category
 
@@ -36,7 +36,9 @@ from apps.category.models import Category
 class ProductCreateView(generics.CreateAPIView):
     serializer_class = ProductSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.add_product'
+
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -87,7 +89,9 @@ class ProductCreateView(generics.CreateAPIView):
 class ProductCategoryBulkCreateView(generics.CreateAPIView):
     serializer_class = ProductCategoryBulkSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.add_product'
+
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -112,7 +116,9 @@ class ProductCategoryBulkCreateView(generics.CreateAPIView):
 class ProductCategoryBulkRemoveView(generics.CreateAPIView):
     serializer_class = ProductCategoryBulkSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.add_product'
+
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -135,7 +141,8 @@ class ProductCategoryBulkRemoveView(generics.CreateAPIView):
 class ProductCategoryBulkUpdateView(generics.UpdateAPIView):
     serializer_class = ProductCategoryBulkSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.change_product'
 
     def patch(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -162,16 +169,13 @@ class ProductListView(generics.ListAPIView):
     queryset = Product.objects.filter(is_deleted=False).order_by("-created_at")
     serializer_class = ProductSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.view_product'
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = ProductFilter
     search_fields = ["name", "name_ar", "description", "slug"]
     ordering_fields = [
-        "price_pdf",
-        "-price_pdf",
-        "price_sib",
-        "-price_sib",
         "name",
         "-name",
     ]
@@ -186,7 +190,8 @@ class DeletedProductListView(generics.ListAPIView):
     queryset = Product.objects.filter(is_deleted=True).order_by("-created_at")
     serializer_class = ProductSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.view_product'
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = ProductFilter
@@ -204,7 +209,9 @@ class DeletedProductListView(generics.ListAPIView):
 class ProductByCategoryView(generics.ListAPIView):
     serializer_class = ProductSerializer
     pagination_class = StandardResultsSetPagination
-
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.view_product'
     def get_queryset(self):
         category_id = self.request.query_params.get("category_id")
         try:
@@ -219,7 +226,8 @@ class ProductByCategoryView(generics.ListAPIView):
 class ProductRetrieveView(generics.RetrieveAPIView):
     serializer_class = ProductSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.view_product'
     lookup_field = "id"
 
     def get_object(self):
@@ -233,17 +241,15 @@ class ProductActiveListView(generics.ListAPIView):
         "-created_at"
     )
     serializer_class = ProductImageOnlySerializer
-    # authentication_classes = [JWTAuthentication]
-    # permission_classes = [CustomerPermission]
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.view_product'
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = ProductFilter
     search_fields = ["name", "description", "slug", "name_ar"]
     ordering_fields = [
-        "price_pdf",
-        "-price_pdf",
-        "price_sib",
-        "-price_sib",
+
         "name",
         "-name",
     ]
@@ -256,6 +262,9 @@ class ProductActiveListView(generics.ListAPIView):
 
 class ProductActiveRetrieveView(generics.RetrieveAPIView):
     serializer_class = ProductImageOnlySerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.view_product'
     lookup_field = "id"
 
     def get_object(self):
@@ -263,30 +272,14 @@ class ProductActiveRetrieveView(generics.RetrieveAPIView):
         product = get_object_or_404(Product, id=product_id)
         return product
 
-    def retrieve(self, request, *args, **kwargs):
-        instance = self.get_object()
-        user = request.user
 
-        # Check if the user is authenticated and has an associated Customer object
-        if user.is_authenticated and not isinstance(user, AnonymousUser):
-            try:
-                customer = user.customer
-                instance.increment_views_num(customer)
-            except ObjectDoesNotExist:
-                # User is authenticated but not a customer, so just return the product data
-                pass
-        else:
-            # User is not authenticated, so just return the product data
-            pass
-
-        serializer = self.get_serializer(instance)
-        return Response(serializer.data)
 
 
 class ProductChangeActiveView(generics.UpdateAPIView):
     serializer_class = ProductActiveSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.change_product'
 
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)
@@ -317,7 +310,8 @@ class ProductUpdateView(generics.UpdateAPIView):
     serializer_class = ProductSerializer
     lookup_field = "id"
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.change_product'
 
     def get_object(self):
         product_id = self.request.query_params.get("product_id")
@@ -342,7 +336,8 @@ class ProductUpdateView(generics.UpdateAPIView):
 class ProductDeleteTemporaryView(generics.UpdateAPIView):
     serializer_class = ProductDeleteSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.change_product'
 
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)
@@ -388,7 +383,8 @@ class ProductRestoreView(generics.RetrieveUpdateAPIView):
 
     serializer_class = ProductDeleteSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.change_product'
 
     def update(self, request, *args, **kwargs):
         product_ids = request.data.get("product_id", [])
@@ -426,7 +422,8 @@ class ProductRestoreView(generics.RetrieveUpdateAPIView):
 
 class ProductDeleteView(generics.DestroyAPIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='product.delete_product'
 
     def delete(self, request, *args, **kwargs):
         product_ids = request.data.get("product_id", [])
@@ -445,4 +442,4 @@ class ProductDialogView(generics.ListAPIView):
     queryset = Product.objects.filter(is_deleted=False)
     serializer_class = ProductDialogSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated]

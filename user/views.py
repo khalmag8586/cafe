@@ -50,7 +50,7 @@ from user.filters import UserFilter
 
 from cafe.pagination import StandardResultsSetPagination
 
-from cafe.custom_permissions import CustomerPermission
+from cafe.custom_permissions import HasPermissionOrInGroupWithPermission
 
 
 # User login view
@@ -109,7 +109,8 @@ class LoginView(APIView):
 class CreateUserView(generics.CreateAPIView):
     serializer_class = UserSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='user.add_user'
 
     def perform_create(self, serializer):
         # Capitalize the user's name before saving
@@ -133,8 +134,8 @@ class UserListView(generics.ListAPIView):
     ).order_by("-created_at")
     serializer_class = UserSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='user.view_user'
 
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -154,7 +155,8 @@ class DeletedUserView(generics.ListAPIView):
     queryset = User.objects.filter(is_deleted=True).order_by("-created_at")
     serializer_class = UserSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='user.view_user'
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = UserFilter
@@ -172,7 +174,8 @@ class DeletedUserView(generics.ListAPIView):
 class UserRetrieveView(generics.RetrieveAPIView):
     serializer_class = UserSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='user.view_user'
     lookup_field = "id"
 
     def get_queryset(self):
@@ -187,7 +190,8 @@ class UserRetrieveView(generics.RetrieveAPIView):
 class UploadUserPhotoView(generics.UpdateAPIView):
     serializer_class = UserImageSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='user.change_user'
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -223,7 +227,8 @@ class UploadUserPhotoView(generics.UpdateAPIView):
 class UploadUserCoverView(generics.UpdateAPIView):
     serializer_class = UserCoverSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='user.change_user'
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -258,7 +263,8 @@ class UploadUserCoverView(generics.UpdateAPIView):
 class ManagerUserView(generics.RetrieveUpdateAPIView):
     serializer_class = UserSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='user.change_user'
 
     def get_object(self):
         return self.request.user
@@ -279,7 +285,8 @@ class ManagerUserView(generics.RetrieveUpdateAPIView):
 class UserDeleteTemporaryView(generics.UpdateAPIView):
     serializer_class = UserDeleteSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='user.change_user'
 
     def update(self, request, *args, **kwargs):
         user_ids = request.data.get("user_id", [])
@@ -317,7 +324,8 @@ class UserRestoreView(generics.RetrieveUpdateAPIView):
 
     serializer_class = UserDeleteSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='user.change_user'
 
     def update(self, request, *args, **kwargs):
         user_ids = request.data.get("user_id", [])
@@ -350,7 +358,8 @@ class UserRestoreView(generics.RetrieveUpdateAPIView):
 class UserUpdateView(generics.RetrieveUpdateAPIView):
     serializer_class = UserSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='user.change_user'
     lookup_field = "id"
 
     def get_object(self):
@@ -372,7 +381,8 @@ class UserUpdateView(generics.RetrieveUpdateAPIView):
 
 class UserDeleteView(APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename='user.delete_user'
 
     def delete(self, request, format=None):
         data = JSONParser().parse(request)
@@ -411,12 +421,12 @@ class UserDialogView(generics.ListAPIView):
     serializer_class = UserDialogSerializer
     queryset = User.objects.filter(is_deleted=False, is_superuser=False)
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated]
 
 
 class UserGenderDialogView(APIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
         # Define the gender choices here
@@ -498,65 +508,3 @@ def forgot_password(request):
             status=status.HTTP_405_METHOD_NOT_ALLOWED,
         )
 
-
-# Exporting user model
-class ExportUsersToCSV(APIView):
-    authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
-
-    def get(self, request):
-        empty_export = request.query_params.get("empty", "").lower() == "true"
-
-        response = HttpResponse(content_type="text/csv")
-
-        # Define headers list regardless of the export type
-        headers = [
-            _("Email"),
-            _("Name"),
-            _("Name Arabic"),
-            _("Created At"),
-            _("Updated At"),
-            _("Nationality"),
-            _("Passport"),
-            _("Identification"),
-            _("Birthdate"),
-            _("Position"),
-            _("Gender"),
-            _("Education"),
-            _("Home Address"),
-            _("Mobile Number"),
-        ]
-
-        # Check if empty_export is True, if so, only export headers
-        if empty_export:
-            response["Content-Disposition"] = (
-                'attachment; filename="employee_headers.csv"'
-            )
-            writer = csv.writer(response)
-            writer.writerow(headers)
-            return response
-        else:
-            response["Content-Disposition"] = 'attachment; filename="employees.csv"'
-            users = User.objects.filter(is_superuser=False)
-            writer = csv.writer(response)
-            writer.writerow(headers)
-            for user in users:
-                writer.writerow(
-                    [
-                        user.email,
-                        user.name,
-                        user.name_ar,
-                        user.created_at,
-                        user.updated_at,
-                        user.nationality,
-                        user.passport,
-                        user.identification,
-                        user.birthdate,
-                        user.position,
-                        user.gender,
-                        user.education,
-                        user.home_address,
-                        user.mobile_number,
-                    ]
-                )
-            return response

@@ -57,7 +57,6 @@ class Category(models.Model):
         upload_to=category_image_file_path,
     )
 
-
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         if self.image:

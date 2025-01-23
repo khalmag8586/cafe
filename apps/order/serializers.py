@@ -2,8 +2,6 @@ from rest_framework import serializers
 
 from apps.order.models import Order, OrderItems
 
-from apps.cart.serializers import CartSerializer
-from apps.cart.models import CartItems
 
 from rest_framework import serializers
 
@@ -19,7 +17,6 @@ class OrderItemsSerializer(serializers.ModelSerializer):
         model = OrderItems
         fields = [
             "id",
-            "cart",
             "order",
             "product",
             "product_name",
@@ -32,29 +29,7 @@ class OrderItemsSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "order", "sub_total"]
 
-    def get_file(self, obj):
-        request = self.context.get("request")
-        if obj.purchase_type == "pdf":
-            pdf_file_url = obj.product.pdf_file.url if obj.product.pdf_file else None
-            file_url = {
-                "pdf": (
-                    request.build_absolute_uri(pdf_file_url) if pdf_file_url else None
-                )
-            }
-            return file_url
-        elif obj.purchase_type == "sib":
-            pdf_file_url = obj.product.pdf_file.url if obj.product.pdf_file else None
-            sib_file_url = obj.product.sib_file.url if obj.product.sib_file else None
-            file_url = {
-                "pdf": (
-                    request.build_absolute_uri(pdf_file_url) if pdf_file_url else None
-                ),
-                "sib": (
-                    request.build_absolute_uri(sib_file_url) if sib_file_url else None
-                ),
-            }
-            return file_url
-        return None
+    
 
 
 class OrderSerializer(serializers.ModelSerializer):

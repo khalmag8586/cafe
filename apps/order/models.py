@@ -1,11 +1,10 @@
 from django.db import models
 
-from apps.cart.models import Cart
-from apps.customer.models import Customer
-
+from django.conf import settings
 import uuid
 from decimal import Decimal
 from apps.product.models import Product
+
 
 class Order(models.Model):
     PAYMENT_STATUS_CHOICES = [
@@ -37,14 +36,14 @@ class Order(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
-        Customer,
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         blank=True,
         null=True,
         related_name="order_created_by_customer",
     )
     updated_by = models.ForeignKey(
-        Customer,
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         blank=True,
         null=True,
@@ -97,11 +96,6 @@ class OrderItems(models.Model):
         default=uuid.uuid4,
         primary_key=True,
         editable=False,
-    )
-    cart = models.ForeignKey(
-        Cart,
-        on_delete=models.CASCADE,
-        related_name="cart_order",
     )
     order = models.ForeignKey(
         Order,
