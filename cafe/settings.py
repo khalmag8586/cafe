@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "apps.contact_us",
     "apps.section",
     "apps.order",
+    "apps.printer",
 
 ]
 
