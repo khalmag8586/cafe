@@ -180,10 +180,7 @@ class ProductListView(generics.ListAPIView):
         "-name",
     ]
 
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        queryset = queryset.annotate(avg_ratings=Avg("ratings__stars"))
-        return queryset
+
 
 
 class DeletedProductListView(generics.ListAPIView):
@@ -254,10 +251,7 @@ class ProductActiveListView(generics.ListAPIView):
         "-name",
     ]
 
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        queryset = queryset.annotate(avg_ratings=Avg("ratings__stars"))
-        return queryset
+    
 
 
 class ProductActiveRetrieveView(generics.RetrieveAPIView):

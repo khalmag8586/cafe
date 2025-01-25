@@ -21,13 +21,13 @@ from apps.section.serializers import (
 )
 
 from cafe.pagination import StandardResultsSetPagination
-from cafe.custom_permissions import CustomerPermission
+from cafe.custom_permissions import HasPermissionOrInGroupWithPermission
 
 
 class SectionCreateView(generics.CreateAPIView):
     serializer_class = SectionSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
         section = serializer.save(
@@ -56,7 +56,7 @@ class SectionCreateView(generics.CreateAPIView):
 class SectionListView(generics.ListAPIView):
     serializer_class = SectionSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated]
     queryset = Section.objects.all().order_by("-created_at")
     pagination_class = StandardResultsSetPagination
 
@@ -64,7 +64,7 @@ class SectionListView(generics.ListAPIView):
 class SectionRetrieveView(generics.RetrieveAPIView):
     serializer_class = SectionSerializer
     # authentication_classes = [JWTAuthentication]
-    # permission_classes = [CustomerPermission]
+    # permission_classes = [IsAuthenticated]
     lookup_field = "slug"
 
     def get_object(self):
@@ -79,13 +79,13 @@ class ActiveSectionListView(generics.ListAPIView):
     )
     serializer_class = SectionSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsSetPagination
 
 class SectionChangeActiveView(generics.UpdateAPIView):
     serializer_class = ActiveSectionSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated]
 
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)
@@ -116,7 +116,7 @@ class SectionUpdateView(generics.UpdateAPIView):
     serializer_class = SectionSerializer
     lookup_field = "section_id"
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self):
         section_id = self.request.query_params.get("section_id")
@@ -178,7 +178,7 @@ class SectionMediaUpdateView(generics.UpdateAPIView):
 class SectionMediaDeleteView(generics.DestroyAPIView):
     serializer_class = SectionMediaSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated]
     queryset = SectionMediaFiles.objects.all()
 
     def delete(self, request, *args, **kwargs):
@@ -194,7 +194,7 @@ class SectionMediaDeleteView(generics.DestroyAPIView):
 
 class SectionDeleteView(generics.DestroyAPIView):
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated]
 
     def delete(self, request, *args, **kwargs):
         section_ids = request.data.get("section_id")
@@ -210,4 +210,4 @@ class SectionDialogView(generics.ListAPIView):
     queryset = Section.objects.filter(is_deleted=False)
     serializer_class = SectionDialogSerializer
     authentication_classes = [JWTAuthentication]
-    permission_classes = [CustomerPermission]
+    permission_classes = [IsAuthenticated]

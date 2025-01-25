@@ -54,3 +54,18 @@ class PrinterListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "printer.view_printer"
     pagination_class = StandardResultsSetPagination
+
+class PrinterDeleteView(generics.DestroyAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "printer.delete_printer"
+    def delete(self, request, *args, **kwargs):
+        printer_ids=request.data.get('printer_id',[])
+        for printer_id in printer_ids:
+            instance=get_object_or_404(Printer,id=printer_id)
+            instance.delete()
+
+        return Response(
+                    {"detail": _("Printer permanently deleted successfully")},
+                    status=status.HTTP_204_NO_CONTENT,
+                )

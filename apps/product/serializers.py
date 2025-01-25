@@ -6,7 +6,7 @@ from base64 import b64encode
 
 from django.utils.translation import gettext_lazy as _
 
-from apps.product.models import Product
+from apps.product.models import Product, ProductImages
 from apps.category.models import Category
 from apps.category.serializers import CategorySerializer
 
@@ -17,12 +17,24 @@ class CategorySimpleSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "name_ar", "slug"]
 
 
-
-
 # Product serializers
+class ProductImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductImages
+        fields = "__all__"
 
 
 class ProductSerializer(serializers.ModelSerializer):
+    gallery = ProductImageSerializer(
+        many=True, read_only=True, required=False, source="product_images"
+    )
+    uploaded_images = serializers.ListField(
+        child=serializers.ImageField(
+            max_length=1000000, allow_empty_file=False, use_url=False
+        ),
+        write_only=True,
+        required=False,
+    )
     created_by_user_name = serializers.CharField(
         source="created_by.name", read_only=True
     )
@@ -41,7 +53,6 @@ class ProductSerializer(serializers.ModelSerializer):
     category = serializers.ListField(
         child=serializers.UUIDField(), write_only=True, required=False
     )
-    ratings = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -50,6 +61,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "name",
             "name_ar",
             "description",
+            "price",
             "category",
             "section",
             "section_name",
@@ -63,7 +75,8 @@ class ProductSerializer(serializers.ModelSerializer):
             "updated_by_user_name",
             "updated_by_user_name_ar",
             "is_active",
-            "image",
+            "gallery",
+            "uploaded_images",
         ]
         read_only_fields = [
             "id",
@@ -91,6 +104,12 @@ class ProductSerializer(serializers.ModelSerializer):
         for category_id in category_ids:
             category = Category.objects.get(pk=category_id)
             product.category.add(category)  # Add each category to the product
+        # Create ProductImages instances for uploaded images
+        if uploaded_images_data:
+            for image_data in uploaded_images_data:
+                ProductImages.objects.create(
+                    product=product, image=image_data
+                )  # Associate product image with the product
 
         return product
 
@@ -118,8 +137,6 @@ class ProductSerializer(serializers.ModelSerializer):
         ).data
         representation["category"] = categories_data
         return representation
-
-
 
 
 class ProductImageOnlySerializer(serializers.ModelSerializer):
@@ -160,7 +177,6 @@ class ProductImageOnlySerializer(serializers.ModelSerializer):
             "updated_by_user_name_ar",
             "is_active",
             "image",
-
         ]
         read_only_fields = [
             "id",
@@ -201,8 +217,6 @@ class ProductImageOnlySerializer(serializers.ModelSerializer):
 
         return instance
 
-
-
     def get_created_at(self, obj):
         return obj.created_at.strftime("%Y-%m-%d")
 
@@ -217,8 +231,6 @@ class ProductImageOnlySerializer(serializers.ModelSerializer):
         ).data
         representation["category"] = categories_data
         return representation
-
-    
 
 
 class ProductActiveSerializer(serializers.ModelSerializer):

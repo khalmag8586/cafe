@@ -47,7 +47,7 @@ class Product(models.Model):
     name_ar = models.CharField(max_length=255, unique=True)
     slug = models.SlugField(max_length=255, allow_unicode=True, unique=True)
     description = models.TextField(blank=True, null=True)
-
+    price=models.DecimalField(max_digits=10, decimal_places=2)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -70,11 +70,7 @@ class Product(models.Model):
     image = models.ImageField(blank=True, null=True, upload_to=product_image_file_path)
 
     def save(self, *args, **kwargs):
-        # # Set the price based on the purchase type
-        # if self.purchase_type == 'pdf':
-        #     self.price = self.price_pdf
-        # elif self.purchase_type == 'sib':
-        #     self.price = self.price_sib
+
         super().save(*args, **kwargs)
         if self.image:
             image_size = self.image.size  # Size in bytes
@@ -114,7 +110,15 @@ class Product(models.Model):
                 )
 
 
-
+class ProductImages(models.Model):
+    product= models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="product_images"
+    )
+    image = models.ImageField(
+        null=True,
+        blank=True,
+        upload_to=product_image_file_path,
+    )
 
 
 
