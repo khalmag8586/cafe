@@ -68,6 +68,7 @@ class Product(models.Model):
         null=True,
     )
     image = models.ImageField(blank=True, null=True, upload_to=product_image_file_path)
+    photo = models.ImageField(blank=True, null=True, upload_to=product_image_file_path)
 
     def save(self, *args, **kwargs):
 

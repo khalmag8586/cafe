@@ -22,6 +22,8 @@ class ProductImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductImages
         fields = "__all__"
+        read_only_fields = ["id"]
+        extra_kwargs = {"image": {"required": "True"}}
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -77,6 +79,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "is_active",
             "gallery",
             "uploaded_images",
+            "photo",
         ]
         read_only_fields = [
             "id",

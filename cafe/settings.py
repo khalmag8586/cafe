@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "apps.about_us",
     "apps.contact_us",
     "apps.section",
+    "apps.table",
     "apps.order",
     "apps.printer",
 
@@ -73,16 +74,14 @@ LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'handlers': {
-        'file': {
-            'level': 'DEBUG',
-            'class': 'logging.FileHandler',
-            'filename': 'django_debug.log',
+        'console': {
+            'class': 'logging.StreamHandler',
         },
     },
     'loggers': {
-        'django': {
-            'handlers': ['file'],
-            'level': 'DEBUG',
+        'django.utils.autoreload': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Change from DEBUG to INFO or higher
             'propagate': True,
         },
     },

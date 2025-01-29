@@ -27,6 +27,7 @@ urlpatterns += i18n_patterns(
     path("api/product/", include("apps.product.urls")),
     path("api/about_us/", include("apps.about_us.urls")),
     path("api/contact_us/", include("apps.contact_us.urls")),
+    path("api/table/", include("apps.table.urls")),
     path("api/order/", include("apps.order.urls")),
     path("api/printer/", include("apps.printer.urls")),
 )

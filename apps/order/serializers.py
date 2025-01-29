@@ -1,17 +1,14 @@
 from rest_framework import serializers
+from django.utils.translation import gettext_lazy as _
+from apps.order.models import Order, OrderItems, Payment
 
-from apps.order.models import Order, OrderItems
-
-
-from rest_framework import serializers
+from decimal import Decimal
 
 
 class OrderItemsSerializer(serializers.ModelSerializer):
 
     product_name = serializers.CharField(source="product.name", read_only=True)
     product_name_ar = serializers.CharField(source="product.name_ar", read_only=True)
-    product_image = serializers.ImageField(source="product.image")
-    file = serializers.SerializerMethodField()
 
     class Meta:
         model = OrderItems
@@ -21,21 +18,21 @@ class OrderItemsSerializer(serializers.ModelSerializer):
             "product",
             "product_name",
             "product_name_ar",
-            "product_image",
-            "purchase_type",
             "quantity",
+            "remaining_quantity",
+            "is_paid",
+            "paid_by",
             "sub_total",
-            "file",
         ]
-        read_only_fields = ["id", "order", "sub_total"]
-
-    
+        read_only_fields = ["id", "order", "sub_total", "remaining_quantity"]
 
 
 class OrderSerializer(serializers.ModelSerializer):
-    order_items = OrderItemsSerializer(many=True, read_only=True)
+    order_items = OrderItemsSerializer(many=True)
     created_at = serializers.SerializerMethodField()
     updated_at = serializers.SerializerMethodField()
+    check_in = serializers.SerializerMethodField()
+
     created_by_name = serializers.CharField(source="created_by.name", read_only=True)
     created_by_name_ar = serializers.CharField(
         source="created_by.name_ar", read_only=True
@@ -44,29 +41,30 @@ class OrderSerializer(serializers.ModelSerializer):
     updated_by_name_ar = serializers.CharField(
         source="updated_by.name_ar", read_only=True
     )
-    customer_phone = serializers.CharField(source="created_by.mobile_number")
-    customer_email = serializers.CharField(source="created_by.email")
 
     class Meta:
         model = Order
         fields = [
             "id",
-            "order_number",
-            "payment_method",
-            "payment_status",
+            "table",
+            "number_of_pax",
+            "check_in",
+            "check_out_time",
+            "hall",
+            "shift",
+            "kot_number",
             "order_items",
             "final_total",
+            "vat",
+            "is_paid",
             "created_at",
             "updated_at",
             "created_by",
             "created_by_name",
             "created_by_name_ar",
-            "customer_phone",
-            "customer_email",
             "updated_by",
             "updated_by_name",
             "updated_by_name_ar",
-            "paypal_payment_id",
         ]
         read_only_fields = [
             "id",
@@ -76,7 +74,8 @@ class OrderSerializer(serializers.ModelSerializer):
             "updated_at",
             "created_by",
             "updated_by",
-            "paypal_payment_id",
+            "vat",
+            "kot_number",
         ]
 
     def get_created_at(self, obj):
@@ -85,8 +84,65 @@ class OrderSerializer(serializers.ModelSerializer):
     def get_updated_at(self, obj):
         return obj.updated_at.strftime("%Y-%m-%d--%H-%M-%S")
 
+    def get_check_in(self, obj):
+        return obj.created_at.strftime("%H-%M-%S")
 
-class OrderDialogSerializer(serializers.ModelSerializer):
+    def validate(self, data):
+        table = data.get("table")
+        if table and table.is_occupied:
+            raise serializers.ValidationError(
+                _("The table is already occupied. Please select another table.")
+            )
+        return data
+
+    def create(self, validated_data):
+        # Extract order_items data from validated_data
+        order_items_data = validated_data.pop("order_items")
+
+        # Create the Order instance
+        order = Order.objects.create(**validated_data)
+
+        # Create OrderItems instances and calculate final_total
+        total = Decimal("0.00")
+        for item_data in order_items_data:
+            order_item = OrderItems.objects.create(order=order, **item_data)
+            total += order_item.sub_total  # Accumulate the subtotal for final total
+
+        # Set final_total and vat after all order items are created
+        order.final_total = total
+        order.vat = total - (total / Decimal("1.05"))  # Assuming 5% VAT
+        order.save()  # Save the order to update final_total and vat
+
+        return order
+
+    def update(self, instance, validated_data):
+        # Extract order_items data from validated_data
+        order_items_data = validated_data.pop("order_items")
+
+        # Update the Order instance
+        instance.table = validated_data.get("table", instance.table)
+        instance.number_of_pax = validated_data.get(
+            "number_of_pax", instance.number_of_pax
+        )
+        instance.hall = validated_data.get("hall", instance.hall)
+        instance.save()
+
+        # Delete existing order_items and create new ones
+        instance.order_items.all().delete()
+        total = Decimal("0.00")
+        for item_data in order_items_data:
+            order_item = OrderItems.objects.create(order=instance, **item_data)
+            total += order_item.sub_total  # Accumulate the subtotal for final total
+
+        # Set final_total and vat after all order items are created
+        instance.final_total = total
+        instance.vat = total - (total / Decimal("1.05"))  # Assuming 5% VAT
+        instance.save()  # Save the order to update final_total and vat
+
+        return instance
+
+
+class PaymentSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Order
-        fields = ["id", "order_number"]
+        model = Payment
+        fields = ["id", "order", "amount", "payment_method", "created_at"]
