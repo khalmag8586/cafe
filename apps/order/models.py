@@ -32,6 +32,7 @@ class Order(models.Model):
     final_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     vat = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     is_paid = models.BooleanField(default=False)
+    is_deleted=models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(

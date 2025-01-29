@@ -32,7 +32,7 @@ class OrderSerializer(serializers.ModelSerializer):
     created_at = serializers.SerializerMethodField()
     updated_at = serializers.SerializerMethodField()
     check_in = serializers.SerializerMethodField()
-
+    table_number = serializers.CharField(source="table.table_number", read_only=True)
     created_by_name = serializers.CharField(source="created_by.name", read_only=True)
     created_by_name_ar = serializers.CharField(
         source="created_by.name_ar", read_only=True
@@ -47,6 +47,7 @@ class OrderSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "table",
+            "table_number",
             "number_of_pax",
             "check_in",
             "check_out_time",
@@ -57,6 +58,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "final_total",
             "vat",
             "is_paid",
+            "is_deleted",
             "created_at",
             "updated_at",
             "created_by",
@@ -76,6 +78,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "updated_by",
             "vat",
             "kot_number",
+            "is_deleted",
         ]
 
     def get_created_at(self, obj):
@@ -142,7 +145,39 @@ class OrderSerializer(serializers.ModelSerializer):
         return instance
 
 
+class OrderDeletedSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Order
+        fields = ["is_deleted"]
+
+
 class PaymentSerializer(serializers.ModelSerializer):
+    created_at = serializers.SerializerMethodField()
+    created_by_name = serializers.CharField(source="created_by.name", read_only=True)
+    created_by_name_ar = serializers.CharField(
+        source="created_by.name_ar", read_only=True
+    )
+
     class Meta:
         model = Payment
-        fields = ["id", "order", "amount", "payment_method", "created_at"]
+        fields = [
+            "id",
+            "orders",
+            "amount",
+            "payment_method",
+            "created_at",
+            "created_by",
+            "created_by_name",
+            "created_by_name_ar",
+        ]
+        read_only_fields = [
+            "id",
+        ]
+
+    def get_created_at(self, obj):
+        return obj.created_at.strftime("%Y-%m-%d %H:%M:%S")
+
+
+class PaymentMethodSerializer(serializers.Serializer):
+    value = serializers.CharField()
+    display = serializers.CharField()

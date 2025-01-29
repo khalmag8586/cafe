@@ -1,5 +1,4 @@
-from django.shortcuts import redirect, get_object_or_404
-from django.urls import reverse
+from django.shortcuts import get_object_or_404
 from django.utils.translation import gettext_lazy as _
 from django.db import transaction
 
@@ -8,6 +7,8 @@ from rest_framework.response import Response
 from rest_framework import status, generics
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django_filters.rest_framework import DjangoFilterBackend
 
 
 from rest_framework_simplejwt.authentication import JWTAuthentication
@@ -17,8 +18,11 @@ from apps.product.models import Product
 from apps.order.serializers import (
     OrderSerializer,
     OrderItemsSerializer,
+    OrderDeletedSerializer,
     PaymentSerializer,
+    PaymentMethodSerializer,
 )
+from apps.order.filters import OrderFilter, PaymentFilter
 from apps.printer.models import Printer
 
 from cafe.pagination import StandardResultsSetPagination
@@ -30,16 +34,8 @@ from cafe.util import (
     format_shisha_order,
 )
 
-import os
-import requests
 from decimal import Decimal
-import json
-from django.http import JsonResponse
 
-from django.conf import settings
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
-from django.views.decorators.http import require_http_methods
 from django.utils.timezone import now
 
 
@@ -557,21 +553,43 @@ class GroupBillsView(generics.CreateAPIView):
 
 
 class OrderUnpaidListView(generics.ListAPIView):
-    queryset = Order.objects.filter(is_paid=False).order_by("-created_at")
+    queryset = Order.objects.filter(is_paid=False, is_deleted=False).order_by(
+        "-created_at"
+    )
     serializer_class = OrderSerializer
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "order.view_order"
     pagination_class = StandardResultsSetPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = OrderFilter
+    ordering_fields = ["id", "created_at"]
 
 
 class OrderPaidListView(generics.ListAPIView):
-    queryset = Order.objects.filter(is_paid=True).order_by("-created_at")
+    queryset = Order.objects.filter(is_paid=True, is_deleted=False).order_by(
+        "-created_at"
+    )
     serializer_class = OrderSerializer
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "order.view_order"
     pagination_class = StandardResultsSetPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = OrderFilter
+    ordering_fields = ["id", "created_at"]
+
+
+class OrderDeletedListView(generics.ListAPIView):
+    queryset = Order.objects.filter(is_deleted=True).order_by("-created_at")
+    serializer_class = OrderSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "order.view_order"
+    pagination_class = StandardResultsSetPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = OrderFilter
+    ordering_fields = ["id", "created_at"]
 
 
 class OrderRetrieve(generics.RetrieveAPIView):
@@ -585,6 +603,89 @@ class OrderRetrieve(generics.RetrieveAPIView):
         order_id = self.request.query_params.get("order_id")
         order = get_object_or_404(Order, id=order_id)
         return order
+
+
+class OrderDeleteTemporaryView(generics.UpdateAPIView):
+    serializer_class = OrderDeletedSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "order.delete_order"
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        order_ids = request.data.get("order_id", [])
+        partial = kwargs.pop("partial", False)
+        is_deleted = request.data.get("is_deleted")
+
+        if is_deleted == False:
+            return Response(
+                {"detail": _("These orders are not deleted")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        for order_id in order_ids:
+            instance = get_object_or_404(Order, id=order_id)
+            if instance.is_deleted:
+                return Response(
+                    {
+                        "detail": _(
+                            "Product with ID {} is already temp deleted".format(
+                                order_id
+                            )
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            instance.is_active = False
+            instance.save()
+            serializer = self.get_serializer(
+                instance, data=request.data, partial=partial
+            )
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+
+        return Response(
+            {"detail": _("Orders temp deleted successfully")},
+            status=status.HTTP_200_OK,
+        )
+
+
+class OrderRestoreView(generics.RetrieveUpdateAPIView):
+
+    serializer_class = OrderDeletedSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "order.delete_order"
+
+    def update(self, request, *args, **kwargs):
+        order_ids = request.data.get("order_id", [])
+        partial = kwargs.pop("partial", False)
+        is_deleted = request.data.get("is_deleted")
+
+        if is_deleted == True:
+            return Response(
+                {"detail": _("Products are already deleted")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        for order_id in order_ids:
+            instance = get_object_or_404(Order, id=order_id)
+            if instance.is_deleted == False:
+                return Response(
+                    {"detail": _("Product with ID {} is not deleted".format(order_id))},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            instance.is_active = True
+
+            serializer = self.get_serializer(
+                instance, data=request.data, partial=partial
+            )
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+
+        return Response(
+            {"detail": _("Orders restored successfully")}, status=status.HTTP_200_OK
+        )
 
 
 class OrderDeleteView(generics.DestroyAPIView):
@@ -601,3 +702,31 @@ class OrderDeleteView(generics.DestroyAPIView):
             {"detail": _("Order permanently deleted successfully")},
             status=status.HTTP_204_NO_CONTENT,
         )
+
+
+# payment views
+
+
+class PaymentListView(generics.ListAPIView):
+    queryset = Payment.objects.all().order_by("-created_at")
+    serializer_class = PaymentSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "payment.view_payment"
+    pagination_class = StandardResultsSetPagination
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = PaymentFilter
+    ordering_fields = ["id", "created_at"]
+
+
+class PaymentMethodDialogView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        payment_method_choices = [
+            {"value": "cash", "display": _("Cash")},
+            {"value": "card", "display": _("Visa Card")},
+        ]
+        serializer = PaymentMethodSerializer(payment_method_choices, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
