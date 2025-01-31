@@ -13,76 +13,6 @@ from django.conf import settings
 from escpos.printer import Network
 from PIL import Image
 from decimal import Decimal
-from collections import defaultdict
-
-
-def split_bill(order, pax_items):
-    """
-    Split the bill for an order based on which items and quantities each pax has paid for.
-
-    :param order: The Order instance.
-    :param pax_items: A dictionary where keys are pax numbers and values are dictionaries
-                      of item IDs and quantities they are paying for.
-                      Example: {1: {"item_id1": 2, "item_id2": 1}, 2: {"item_id1": 1}}
-    :return: A dictionary with pax numbers as keys and their respective bills as values.
-    """
-    from apps.order.models import OrderItems
-
-    bills = {}
-    item_quantities = defaultdict(int)  # Track remaining quantities for each item
-
-    # Initialize item quantities
-    for item in order.order_items.all():
-        item_quantities[item.id] = item.quantity
-
-    for pax, item_quantities_dict in pax_items.items():
-        pax_bill = {
-            "items": [],
-            "total": Decimal("0.00"),
-        }
-
-        for item_id, quantity in item_quantities_dict.items():
-            try:
-                item = order.order_items.get(id=item_id)
-                if item_quantities[item.id] < quantity:
-                    raise ValueError(
-                        f"Pax {pax} is trying to pay for more quantity than available for item {item.id}."
-                    )
-
-                # Calculate the subtotal for the paid quantity
-                sub_total = (item.product.price * Decimal(quantity)).quantize(
-                    Decimal("0.00")
-                )
-                pax_bill["items"].append(
-                    {
-                        "id": item.id,
-                        "product_name": item.product.name,
-                        "quantity": quantity,
-                        "sub_total": sub_total,
-                    }
-                )
-                pax_bill["total"] += sub_total
-
-                # Update the remaining quantity for the item
-                item_quantities[item.id] -= quantity
-
-                # Mark the item as paid if the entire quantity is paid
-                if item_quantities[item.id] == 0:
-                    item.is_paid = True
-                    item.paid_by = pax
-                    item.save()
-
-            except OrderItems.DoesNotExist:
-                raise ValueError(f"Item with ID {item_id} does not exist in the order.")
-
-        bills[pax] = pax_bill
-
-    # Check if all items in the order are paid
-    if all(quantity == 0 for quantity in item_quantities.values()):
-        order.is_paid = True
-        order.save()
-
-    return bills
 
 
 def format_bill(order, payment, total_payment_amount, vat):
@@ -114,11 +44,15 @@ def format_bill(order, payment, total_payment_amount, vat):
             f"{item_data.quantity}    {item_data.product.price:.2f}    {item_data.sub_total:.2f}"
         )
 
+    # Get discount value (default to 0.00 if no discount is applied)
+    discount_value = order.discount.value if order.discount else 0.00
     # Append the calculated totals
     bill_text.append("")
-    bill_text.append(f"SubTotal:    {total_payment_amount- vat:.2f}")
+    bill_text.append(f"SubTotal:    {total_payment_amount-discount_value:.2f}")
+    bill_text.append(f"Discount:    -{discount_value:.2f}")
     bill_text.append(f"VAT (5%):    {vat:.2f}")
-    bill_text.append(f"Grand Total:   AED    {(total_payment_amount):.2f}")
+
+    bill_text.append(f"Grand Total:   AED    {total_payment_amount:.2f}")
     bill_text.append("")
     bill_text.append("Thanks")
     bill_text.append("Visit again")
@@ -134,32 +68,6 @@ def format_bill(order, payment, total_payment_amount, vat):
         logo_path = None  # If the logo doesn't exist, set logo_path to None
 
     return formatted_bill_text, logo_path
-
-
-def format_barista_order(order):
-    drink_items = order.order_items.filter(product__category__name="Drinks")
-    if not drink_items.exists():
-        return None
-
-    drink_text = ["Drinks Order:"]
-    drink_text.append(f"Order No: {order.id}")
-    drink_text.append("")
-    for item in drink_items:
-        drink_text.append(f"{item.product.name} - {item.quantity} Nos")
-    return "\n".join(drink_text)
-
-
-def format_shisha_order(order):
-    shisha_items = order.order_items.filter(product__category__name="Shisha")
-    if not shisha_items.exists():
-        return None
-
-    shisha_text = ["Shisha Order:"]
-    shisha_text.append(f"Order No: {order.id}")
-    shisha_text.append("")
-    for item in shisha_items:
-        shisha_text.append(f"{item.product.name} - {item.quantity} Nos")
-    return "\n".join(shisha_text)
 
 
 def print_to_printer(printer_ip, bill_text, logo_path=None):

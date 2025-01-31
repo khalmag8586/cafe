@@ -17,7 +17,11 @@ from rest_framework import (
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from apps.table.models import Table
-from apps.table.serializers import TableSerializer, TableActiveSerializer
+from apps.table.serializers import (
+    TableSerializer,
+    TableActiveSerializer,
+    TableCurrentOrderDialogSerializer,
+)
 
 from cafe.custom_permissions import HasPermissionOrInGroupWithPermission
 from cafe.pagination import StandardResultsSetPagination
@@ -177,3 +181,10 @@ class TableDeleteView(generics.DestroyAPIView):
             {"detail": _("Table permanently deleted successfully")},
             status=status.HTTP_200_OK,
         )
+
+
+class TableCurrentOrderDialogView(generics.ListAPIView):
+    serializer_class = TableCurrentOrderDialogSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    queryset = Table.objects.filter(is_active=True).order_by("table_number")

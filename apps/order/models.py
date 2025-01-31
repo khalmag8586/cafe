@@ -11,6 +11,29 @@ from apps.product.models import Product
 from apps.table.models import Table
 
 
+class Discount(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    value = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    discount_reason = models.CharField(max_length=255, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+        related_name="discount_created_by_user",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+        related_name="discount_updated_by_user",
+    )
+
+
 class Order(models.Model):
 
     SHIFT_CHOICES = [
@@ -31,8 +54,10 @@ class Order(models.Model):
 
     final_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     vat = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    discount = models.ForeignKey(Discount, on_delete=models.SET_NULL, null=True)
+    grand_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     is_paid = models.BooleanField(default=False)
-    is_deleted=models.BooleanField(default=False)
+    is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
@@ -98,14 +123,6 @@ class Order(models.Model):
             self.table.save()
         super(Order, self).delete(*args, **kwargs)
 
-    # def split_bill(self, pax_items):
-    #     """
-    #     Split the bill for this order based on which items each pax has paid for.
-    #     """
-    #     from cafe.util import split_bill  # Import the utility function
-
-    #     return split_bill(self, pax_items)
-
 
 class OrderItems(models.Model):
     id = models.UUIDField(
@@ -122,6 +139,8 @@ class OrderItems(models.Model):
     quantity = models.PositiveIntegerField()
     remaining_quantity = models.PositiveIntegerField()  # Unpaid quantity
     is_paid = models.BooleanField(default=False)
+    quantity_to_print = models.PositiveIntegerField(default=0)
+    is_printed = models.BooleanField(default=False)
     paid_by = models.IntegerField(
         null=True, blank=True
     )  # Track which pax paid for this item
@@ -142,7 +161,7 @@ class OrderItems(models.Model):
 
         # Automatically mark as paid if remaining_quantity is zero
         self.is_paid = self.remaining_quantity == 0
-
+        # self.is_printed = self.quantity_to_print == 0
         # Recalculate sub_total based on remaining_quantity
         if not self.product.price:
             raise ValueError("Product price must be set to calculate sub_total.")
@@ -153,7 +172,9 @@ class OrderItems(models.Model):
 
 class Payment(models.Model):
     PAYMENT_CHOICES = [("cash", "Cash"), ("card", "Visa Card")]
-    orders = models.ManyToManyField("Order", related_name="payments")  # Changed from ForeignKey to ManyToMany
+    orders = models.ManyToManyField(
+        "Order", related_name="payments"
+    )  # Changed from ForeignKey to ManyToMany
 
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     payment_method = models.CharField(
@@ -163,5 +184,6 @@ class Payment(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
     def __str__(self):
         return f"Payment {self.id}"

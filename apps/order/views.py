@@ -1,6 +1,7 @@
 from django.shortcuts import get_object_or_404
 from django.utils.translation import gettext_lazy as _
 from django.db import transaction
+from django.db.models import Sum
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -13,7 +14,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
-from apps.order.models import Order, OrderItems, Payment
+from apps.order.models import (
+    Order,
+    OrderItems,
+    Payment,
+    Discount,
+)
 from apps.product.models import Product
 from apps.order.serializers import (
     OrderSerializer,
@@ -21,6 +27,8 @@ from apps.order.serializers import (
     OrderDeletedSerializer,
     PaymentSerializer,
     PaymentMethodSerializer,
+    DiscountSerializer,
+    DiscountActiveSerializer,
 )
 from apps.order.filters import OrderFilter, PaymentFilter
 from apps.printer.models import Printer
@@ -30,8 +38,6 @@ from cafe.custom_permissions import HasPermissionOrInGroupWithPermission
 from cafe.util import (
     print_to_printer,
     format_bill,
-    format_barista_order,
-    format_shisha_order,
 )
 
 from decimal import Decimal
@@ -49,32 +55,6 @@ class OrderCreateView(generics.CreateAPIView):
     def perform_create(self, serializer):
         user = self.request.user
         order = serializer.save(created_by=user)
-        self.print_order(order)
-
-    def print_order(self, order):
-        # Fetch the printers
-        cashier_printer = Printer.objects.filter(printer_type="cashier").first()
-        barista_printer = Printer.objects.filter(printer_type="barista").first()
-        shisha_printer = Printer.objects.filter(printer_type="shisha").first()
-
-        # # Format the bill and get the logo path
-        # bill_text, logo_path = format_bill(order)
-
-        # # Print total for cashier
-        # if cashier_printer:
-        #     print_to_printer(cashier_printer.ip_address, bill_text, logo_path)
-
-        # Print items for barista
-        if barista_printer:
-            barista_text = format_barista_order(order)
-            if barista_text:
-                print_to_printer(barista_printer.ip_address, barista_text)
-
-        # Print items for shisha maker
-        if shisha_printer:
-            shisha_text = format_shisha_order(order)
-            if shisha_text:
-                print_to_printer(shisha_printer.ip_address, shisha_text)
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -103,7 +83,11 @@ class OrderAddMoreItems(generics.CreateAPIView):
                 {"detail": _("Order does not exist.")},
                 status=status.HTTP_404_NOT_FOUND,
             )
-
+        if order.is_paid:
+            return Response(
+                {"detail": _("Order is already paid, You can not add more items")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         items = request.data
         new_items = []  # To store newly added items for printing
 
@@ -128,6 +112,8 @@ class OrderAddMoreItems(generics.CreateAPIView):
                 # Update the quantity and remaining_quantity
                 order_item.quantity += quantity
                 order_item.remaining_quantity += quantity  # Add to remaining_quantity
+                order_item.quantity_to_print += quantity  # Add to quantity_to_print
+                order_item.is_printed = False
                 order_item.save()
                 new_items_total += order_item.sub_total
             else:
@@ -137,55 +123,123 @@ class OrderAddMoreItems(generics.CreateAPIView):
                     product=product,
                     quantity=quantity,
                     remaining_quantity=quantity,  # Initialize remaining_quantity
+                    quantity_to_print=quantity,
+                    is_printed=False,
                 )
                 new_items.append(order_item)
                 new_items_total += order_item.sub_total
 
         # Recalculate final_total and vat for the order
-        order.final_total += new_items_total
+        order.final_total = OrderItems.objects.filter(order=order).aggregate(
+            total=Sum("sub_total")
+        )["total"] or Decimal("0.00")
         order.vat = order.final_total - (
             order.final_total / Decimal("1.05")
         )  # Assuming 5% VAT
+        # Apply discount if applicable
+        discount_value = order.discount.value if order.discount else Decimal("0.00")
+        # Calculate grand_total
+        order.grand_total = order.final_total - discount_value
+        # Ensure grand_total is non-negative (in case of large discounts)
+        if order.grand_total < Decimal("0.00"):
+            order.grand_total = Decimal("0.00")
         order.save()
-
-        # Send print jobs for new items
-        self.print_new_items(order, new_items)
 
         return Response(
             {"detail": _("Items added to order successfully")},
             status=status.HTTP_201_CREATED,
         )
 
-    def print_new_items(self, order, new_items):
+
+class OrderPrintNewItems(generics.GenericAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        order_id = request.query_params.get("order_id")
+        try:
+            order = Order.objects.get(id=order_id)
+        except Order.DoesNotExist:
+            return Response(
+                {"detail": _("Order does not exist.")},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Get unprinted items
+        new_items = OrderItems.objects.filter(order=order, is_printed=False)
+        for item in new_items:
+            print(
+                f"Product: {item.product.name}, Category Type: {type(item.product.category)}"
+            )
+            print(f"Category Data: {item.product.category}")
+
+        if not new_items.exists():
+            return Response(
+                {"detail": _("No new items to print.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Fetch the printers
         barista_printer = Printer.objects.filter(printer_type="barista").first()
         shisha_printer = Printer.objects.filter(printer_type="shisha").first()
 
-        # Group new items by category
+        # Group items by category
         barista_items = [
-            item for item in new_items if item.product.category.name == "Drinks"
+            item
+            for item in new_items
+            if item.product.category.all()
+            and any(c.name.lower() == "drinks" for c in item.product.category.all())
         ]
         shisha_items = [
-            item for item in new_items if item.product.category.name == "Shisha"
+            item
+            for item in new_items
+            if item.product.category.all()
+            and any(c.name.lower() == "shisha" for c in item.product.category.all())
         ]
 
-        # Print new items for barista
+        # Initialize barista_text and shisha_text to avoid UnboundLocalError
+        barista_text = []
+        shisha_text = []
+
+        # Print for barista
         if barista_printer and barista_items:
-            barista_text = ["New Drinks Order:"]
+            barista_text.append("New Drinks Order:")
             barista_text.append(f"Order No: {order.id}")
             barista_text.append("")
             for item in barista_items:
-                barista_text.append(f"{item.product.name} - {item.quantity} Nos")
+                barista_text.append(
+                    f"{item.product.name} - {item.quantity_to_print} Nos"
+                )
             print_to_printer(barista_printer.ip_address, "\n".join(barista_text))
 
-        # Print new items for shisha maker
+        # Print for shisha
         if shisha_printer and shisha_items:
-            shisha_text = ["New Shisha Order:"]
+            shisha_text.append("New Shisha Order:")
             shisha_text.append(f"Order No: {order.id}")
             shisha_text.append("")
             for item in shisha_items:
-                shisha_text.append(f"{item.product.name} - {item.quantity} Nos")
+                shisha_text.append(
+                    f"{item.product.name} - {item.quantity_to_print} Nos"
+                )
             print_to_printer(shisha_printer.ip_address, "\n".join(shisha_text))
+
+        # Mark items as printed and increment quantity_to_print by the difference
+        new_items.update(
+            quantity_to_print=0,
+            is_printed=True,
+        )
+        return Response(
+            {
+                "detail": _("New items printed successfully."),
+                "barista_text": (
+                    barista_text if barista_text else _("No drinks to print.")
+                ),
+                "shisha_text": (
+                    shisha_text if shisha_text else _("No shisha to print.")
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class OrderRemoveItems(generics.DestroyAPIView):
@@ -251,6 +305,13 @@ class OrderRemoveItems(generics.DestroyAPIView):
         if order.final_total < 0:
             order.final_total = 0  # Ensure no negative totals
         order.vat = order.final_total - (order.final_total / Decimal("1.05"))
+        # Apply discount if applicable
+        discount_value = order.discount.value if order.discount else Decimal("0.00")
+        # Calculate grand_total
+        order.grand_total = order.final_total - discount_value
+        # Ensure grand_total is non-negative (in case of large discounts)
+        if order.grand_total < Decimal("0.00"):
+            order.grand_total = Decimal("0.00")
         order.save()
 
         return Response(
@@ -260,6 +321,49 @@ class OrderRemoveItems(generics.DestroyAPIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class ApplyDiscountToOrderView(generics.UpdateAPIView):
+    serializer_class = OrderSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "discount.add_discount"
+    lookup_field = "id"
+
+    def get_object(self):
+        order_id = self.request.query_params.get("order_id")
+        order = get_object_or_404(Order, id=order_id)
+        return order
+
+    def update(self, request, *args, **kwargs):
+        order = self.get_object()
+        discount_id = request.data.get("discount_id")  # Get discount ID from request data
+
+        # Check if the order is already paid
+        if order.is_paid:
+            return Response(
+                {"detail": _("Cannot apply discount to a paid order")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Retrieve discount instance
+        try:
+            discount = Discount.objects.get(id=discount_id)
+        except Discount.DoesNotExist:
+            return Response({"detail": _("Discount not found")}, status=status.HTTP_404_NOT_FOUND)
+        # Apply discount to the order
+        order.discount = discount
+        discount_value = discount.value if discount else Decimal("0.00")
+        order.grand_total -= discount_value
+        # Ensure total is not negative
+        if order.grand_total < Decimal("0.00"):
+            order.grand_total = Decimal("0.00")
+        # Save updated order
+        order.save()
+
+        return Response(
+            {"detail": _("Discount applied successfully")}, status=status.HTTP_200_OK
+        )
+
 
 
 class SplitBillView(generics.CreateAPIView):
@@ -398,7 +502,13 @@ class SplitBillView(generics.CreateAPIView):
         # Update the order with the new values
         order.final_total = final_total
         order.vat = vat.quantize(Decimal("0.01"))  # Round to 2 decimal places
-
+        # Apply discount if applicable
+        discount_value = order.discount.value if order.discount else Decimal("0.00")
+        # Calculate grand_total
+        order.grand_total = order.final_total - discount_value
+        # Ensure grand_total is non-negative (in case of large discounts)
+        if order.grand_total < Decimal("0.00"):
+            order.grand_total = Decimal("0.00")
         # Check if all items are paid
         if all(item.is_paid for item in order_items):
             order.is_paid = True
@@ -426,8 +536,8 @@ class CheckoutOrderView(generics.UpdateAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        final_total = order.final_total
-        if not final_total:
+        grand_total = order.grand_total
+        if not grand_total:
             return Response(
                 {"detail": _("Final total is missing for the order.")},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -443,7 +553,7 @@ class CheckoutOrderView(generics.UpdateAPIView):
         # Save payment and update order status
         with transaction.atomic():
             payment = Payment.objects.create(
-                amount=final_total,
+                amount=grand_total,
                 payment_method=payment_method,
                 created_by=request.user,
             )
@@ -458,7 +568,7 @@ class CheckoutOrderView(generics.UpdateAPIView):
             order.check_out_time = now()  # Set checkout time to current timestamp
 
             order.save()
-        total_payment_amount = order.final_total
+        total_payment_amount = order.grand_total
         vat = order.vat
         # Generate the bill with Payment ID as Invoice No
         formatted_bill, logo_path = format_bill(
@@ -492,7 +602,7 @@ class GroupBillsView(generics.CreateAPIView):
 
             # Calculate total payment
             total_payment_amount = sum(
-                order.final_total for order in orders if order.final_total
+                order.grand_total for order in orders if order.grand_total
             )
             if total_payment_amount == 0:
                 return Response(
@@ -719,6 +829,19 @@ class PaymentListView(generics.ListAPIView):
     ordering_fields = ["id", "created_at"]
 
 
+class PaymentRetrieveView(generics.RetrieveAPIView):
+    serializer_class = PaymentSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "payment.view_payment"
+    lookup_field = "id"
+
+    def get_object(self):
+        payment_id = self.request.query_params.get("payment_id")
+        payment = get_object_or_404(Payment, id=payment_id)
+        return payment
+
+
 class PaymentMethodDialogView(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
@@ -730,3 +853,132 @@ class PaymentMethodDialogView(APIView):
         ]
         serializer = PaymentMethodSerializer(payment_method_choices, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+# discount Views
+class DiscountCreateView(generics.CreateAPIView):
+    serializer_class = DiscountSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "discount.add_discount"
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        serializer.save(created_by=user)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        created_object_id = serializer.instance.id
+
+        return Response(
+            {"id": created_object_id, "detail": _("Discount created successfully")},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class DiscountListView(generics.ListAPIView):
+    queryset = Discount.objects.filter(is_active=True).order_by("-id")
+    serializer_class = DiscountSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "discount.view_discount"
+    pagination_class = StandardResultsSetPagination
+
+
+class DiscountInactiveListView(generics.ListAPIView):
+    queryset = Discount.objects.filter(is_active=False).order_by("-id")
+    serializer_class = DiscountSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "discount.view_discount"
+    pagination_class = StandardResultsSetPagination
+
+
+class DiscountRetrieveView(generics.RetrieveAPIView):
+    serializer_class = DiscountSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "discount.view_discount"
+    lookup_field = "id"
+
+    def get_object(self):
+        discount_id = self.request.query_params.get("discount_id")
+        discount = get_object_or_404(Discount, id=discount_id)
+        return discount
+
+
+class DiscountUpdateView(generics.UpdateAPIView):
+    serializer_class = DiscountSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "discount.change_discount"
+    lookup_field = "id"
+
+    def get_object(self):
+        discount_id = self.request.query_params.get("discount_id")
+        discount = get_object_or_404(Discount, id=discount_id)
+        return discount
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        return Response(
+            {"detail": _("Discount updated successfully")}, status=status.HTTP_200_OK
+        )
+
+
+class DiscountChangeStatusView(generics.UpdateAPIView):
+    serializer_class = DiscountActiveSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "discount.change_discount"
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        discount_ids = request.data.get("discount_id", [])
+        partial = kwargs.pop("partial", False)
+        is_active = request.data.get("is_active")
+        if is_active is None:
+            return Response(
+                {"detail": _("'is_active' field is required")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        for discount_id in discount_ids:
+            instance = get_object_or_404(Discount, id=discount_id)
+            serializer = self.get_serializer(
+                instance, data=request.data, partial=partial
+            )
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+        return Response(
+            {"detail": _("Discount status changed successfully")},
+            status=status.HTTP_200_OK,
+        )
+
+
+class DiscountDeleteView(generics.DestroyAPIView):
+    serializer_class = DiscountSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "discount.delete_discount"
+
+    def delete(self, request, *args, **kwargs):
+        discount_ids = request.data.get("discount_id", [])
+        for discount_id in discount_ids:
+            instance = get_object_or_404(Discount, id=discount_id)
+            instance.delete()
+        return Response(
+            {"detail": _("Discount permanently deleted successfully")},
+            status=status.HTTP_204_NO_CONTENT,
+        )

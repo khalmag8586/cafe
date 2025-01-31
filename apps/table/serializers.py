@@ -39,7 +39,7 @@ class TableSerializer(serializers.ModelSerializer):
             "updated_by_user_name_ar",
             "current_order_id",
         ]
-        read_only_fields = ["id",'is_active']
+        read_only_fields = ["id", "is_active"]
 
     def get_created_at(self, obj):
         return obj.created_at.strftime("%Y-%m-%d")
@@ -55,7 +55,24 @@ class TableSerializer(serializers.ModelSerializer):
                 return current_order.id
         return "N/A"
 
+
 class TableActiveSerializer(serializers.ModelSerializer):
     class Meta:
         model = Table
-        fields = ['is_active']
+        fields = ["is_active"]
+
+
+class TableCurrentOrderDialogSerializer(serializers.ModelSerializer):
+    current_order_id = serializers.SerializerMethodField()  # New field
+
+    class Meta:
+        model = Table
+        fields = ["table_number", "current_order_id"]
+
+    def get_current_order_id(self, obj):
+        if obj.is_occupied:
+            # Use the correct related_name 'tables'
+            current_order = obj.tables.filter(is_paid=False).first()
+            if current_order:
+                return current_order.id
+        return "N/A"
