@@ -678,7 +678,7 @@ class CheckoutOrderView(generics.UpdateAPIView):
             )
 
         grand_total = order.grand_total
-        if not grand_total:
+        if grand_total is None:
             return Response(
                 {"detail": _("Final total is missing for the order.")},
                 status=status.HTTP_400_BAD_REQUEST,
