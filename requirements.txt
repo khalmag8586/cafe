@@ -9,3 +9,4 @@ djoser==2.2.0
 python-escpos
 psycopg2==2.9.9
 paypalrestsdk
+reportlab

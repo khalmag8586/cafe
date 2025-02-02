@@ -187,4 +187,6 @@ class TableCurrentOrderDialogView(generics.ListAPIView):
     serializer_class = TableCurrentOrderDialogSerializer
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
-    queryset = Table.objects.filter(is_active=True).order_by("table_number")
+    queryset = Table.objects.filter(is_active=True, is_occupied=True).order_by(
+        "table_number"
+    )

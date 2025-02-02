@@ -6,7 +6,7 @@ from apps.order.views import (
     OrderRemoveItems,
     OrderPrintNewItems,
     # paying views
-    ApplyDiscountToOrderView,
+    ApplyDiscountToOrderView,RemoveDiscountFromOrderView,
     SplitBillView,
     CheckoutOrderView,
     GroupBillsView,
@@ -40,6 +40,7 @@ urlpatterns = [
     path("remove_items/", OrderRemoveItems.as_view(), name="remove items"),
     # order paying urls
     path("apply_discount/", ApplyDiscountToOrderView.as_view(), name="apply discount"),
+    path("remove_discount/", RemoveDiscountFromOrderView.as_view(), name="remove discount"),
     path("split_bill/", SplitBillView.as_view(), name="split bill"),
     path("checkout_order/", CheckoutOrderView.as_view(), name="checkout order"),
     path("group_bills/", GroupBillsView.as_view(), name="group bills"),

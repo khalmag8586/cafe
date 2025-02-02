@@ -5,6 +5,8 @@ from django.utils.text import slugify
 from django.apps import apps
 from django.db.models import Q
 from django.http import JsonResponse
+from urllib.parse import urljoin
+
 from django.utils.translation import gettext_lazy as _
 from rest_framework.views import APIView
 from django.contrib.auth.models import Group, Permission
@@ -13,9 +15,11 @@ from django.conf import settings
 from escpos.printer import Network
 from PIL import Image
 from decimal import Decimal
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
 
 
-def format_bill(order, payment, total_payment_amount, vat):
+def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
     bill_text = []
     bill_text.append("TAX INVOICE")
     bill_text.append("Coffee Shop Co. L.L.C")
@@ -33,7 +37,6 @@ def format_bill(order, payment, total_payment_amount, vat):
     bill_text.append(f"KOT No: {order.id}")  # Order ID
     bill_text.append(f"Bill Date: {order.created_at.strftime('%d-%m-%Y')}")
     bill_text.append(f"Check In: {order.created_at.strftime('%H-%M-%S')}")
-
     bill_text.append("")
     bill_text.append("Item - UOM    Qty    Price    Value")
     bill_text.append("")
@@ -41,17 +44,18 @@ def format_bill(order, payment, total_payment_amount, vat):
     for item_data in order.order_items.all():
         bill_text.append(f"{item_data.product.name} - Nos")
         bill_text.append(
-            f"{item_data.quantity}    {item_data.product.price:.2f}    {item_data.sub_total:.2f}"
+            f"{item_data.quantity}    {item_data.product.price:.2f}    {item_data.quantity*item_data.product.price:.2f}"
         )
 
     # Get discount value (default to 0.00 if no discount is applied)
-    discount_value = order.discount.value if order.discount else 0.00
+    total_payment_amount = Decimal(total_payment_amount)
+    discount_value = order.discount.value if order.discount else Decimal("0.00")
+
     # Append the calculated totals
     bill_text.append("")
-    bill_text.append(f"SubTotal:    {total_payment_amount-discount_value:.2f}")
+    bill_text.append(f"SubTotal:    {total_payment_amount - discount_value:.2f}")
     bill_text.append(f"Discount:    -{discount_value:.2f}")
     bill_text.append(f"VAT (5%):    {vat:.2f}")
-
     bill_text.append(f"Grand Total:   AED    {total_payment_amount:.2f}")
     bill_text.append("")
     bill_text.append("Thanks")
@@ -63,11 +67,53 @@ def format_bill(order, payment, total_payment_amount, vat):
     # Get the path to the logo file
     logo_path = os.path.join(settings.MEDIA_ROOT, "default_photos", "logo.jpg")
 
-    # Check if the logo file exists
-    if not os.path.exists(logo_path):
-        logo_path = None  # If the logo doesn't exist, set logo_path to None
+    # Define the PDF save path and public URL
+    pdf_url = None
+    if save_as_pdf:
+        filename = f"invoice_{order.id}.pdf"
+        pdf_path, pdf_url = save_bill_as_pdf(formatted_bill_text, filename, logo_path)
 
-    return formatted_bill_text, logo_path
+    return (
+        formatted_bill_text,
+        logo_path,
+        pdf_url,
+    )  # ✅ Return public URL instead of local path
+
+
+def save_bill_as_pdf(bill_text, filename, logo_path=None):
+    """Save bill as a PDF file inside media/uploaded_photos/bills/."""
+
+    # Define the target directory inside the media folder
+    bills_dir = os.path.join(settings.MEDIA_ROOT, "uploads","bills")
+    os.makedirs(bills_dir, exist_ok=True)  # ✅ Ensure directory exists
+
+    # Generate the full PDF file path
+    pdf_path = os.path.join(bills_dir, filename)
+
+    # Create PDF using ReportLab
+    c = canvas.Canvas(pdf_path, pagesize=letter)
+    y_position = 750  # Start writing from the top
+
+    # Add logo if available
+    if logo_path and os.path.exists(logo_path):
+        c.drawImage(logo_path, 50, y_position, width=150, height=75)
+        y_position -= 90  # Move text down after the logo
+
+    # Write each line of the bill
+    for line in bill_text.split("\n"):
+        c.drawString(50, y_position, line)
+        y_position -= 20  # Move down each line
+
+    c.save()
+    print(f"Bill saved as PDF: {pdf_path}")
+
+    # ✅ Generate public URL for the saved PDF
+    pdf_relative_path = (
+        f"uploaded_photos/bills/{filename}"  # Relative path from MEDIA_URL
+    )
+    pdf_url = urljoin(settings.MEDIA_URL, pdf_relative_path)
+
+    return pdf_path, pdf_url  # ✅ Return both file path and public URL
 
 
 def print_to_printer(printer_ip, bill_text, logo_path=None):
@@ -76,13 +122,15 @@ def print_to_printer(printer_ip, bill_text, logo_path=None):
 
         # Print logo if provided
         if logo_path and os.path.exists(logo_path):
-            logo = Image.open(logo_path)
+            logo = Image.open(logo_path).convert("L")  # Convert to grayscale
+            logo = logo.resize(
+                (512, int(logo.height * (512 / logo.width)))
+            )  # Scale width to 512px
             printer.image(logo)
             printer.text("\n")  # Add a newline after the logo
 
         # Print bill text
-        for line in bill_text.split("\n"):
-            printer.text(line + "\n")
+        printer.text(bill_text + "\n")
 
         # Cut the paper
         printer.cut()

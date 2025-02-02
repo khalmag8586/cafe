@@ -55,17 +55,46 @@ class PrinterListView(generics.ListAPIView):
     permission_codename = "printer.view_printer"
     pagination_class = StandardResultsSetPagination
 
+
+class PrinterUpdateView(generics.UpdateAPIView):
+    serializer_class = PrinterSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "printer.change_printer"
+    lookup_field = "id"
+
+    def get_object(self):
+        printer_id = self.request.query_params.get("printer_id")
+        printer = get_object_or_404(Printer, id=printer_id)
+        return printer
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        return Response(
+            {"detail": _("Printer updated successfully")}, status=status.HTTP_200_OK
+        )
+
+
 class PrinterDeleteView(generics.DestroyAPIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "printer.delete_printer"
+
     def delete(self, request, *args, **kwargs):
-        printer_ids=request.data.get('printer_id',[])
+        printer_ids = request.data.get("printer_id", [])
         for printer_id in printer_ids:
-            instance=get_object_or_404(Printer,id=printer_id)
+            instance = get_object_or_404(Printer, id=printer_id)
             instance.delete()
 
         return Response(
-                    {"detail": _("Printer permanently deleted successfully")},
-                    status=status.HTTP_204_NO_CONTENT,
-                )
+            {"detail": _("Printer permanently deleted successfully")},
+            status=status.HTTP_204_NO_CONTENT,
+        )

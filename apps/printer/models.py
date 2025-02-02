@@ -9,6 +9,7 @@ class Printer(models.Model):
         ("cashier", _("Cashier")),
         ("barista", _("Barista")),
         ("shisha", _("Shisha Maker")),
+        ("kitchen", _("Kitchen")),
     ]
     id = models.UUIDField(primary_key=True, editable=False, default=uuid.uuid4)
     name = models.CharField(max_length=100)

@@ -182,7 +182,7 @@ class OrderPrintNewItems(generics.GenericAPIView):
         # Fetch the printers
         barista_printer = Printer.objects.filter(printer_type="barista").first()
         shisha_printer = Printer.objects.filter(printer_type="shisha").first()
-
+        kitchen_printer = Printer.objects.filter(printer_type="kitchen").first()
         # Group items by category
         barista_items = [
             item
@@ -196,11 +196,17 @@ class OrderPrintNewItems(generics.GenericAPIView):
             if item.product.category.all()
             and any(c.name.lower() == "shisha" for c in item.product.category.all())
         ]
+        kitchen_items = [
+            item
+            for item in new_items
+            if item.product.category.all()
+            and any(c.name.lower() == "food" for c in item.product.category.all())
+        ]
 
         # Initialize barista_text and shisha_text to avoid UnboundLocalError
         barista_text = []
         shisha_text = []
-
+        kitchen_text = []
         # Print for barista
         if barista_printer and barista_items:
             barista_text.append("New Drinks Order:")
@@ -222,7 +228,16 @@ class OrderPrintNewItems(generics.GenericAPIView):
                     f"{item.product.name} - {item.quantity_to_print} Nos"
                 )
             print_to_printer(shisha_printer.ip_address, "\n".join(shisha_text))
-
+        # print for food
+        if kitchen_printer and kitchen_items:
+            kitchen_text.append("New Food Order:")
+            kitchen_text.append(f"Order No: {order.id}")
+            kitchen_text.append("")
+            for item in kitchen_items:
+                kitchen_text.append(
+                    f"{item.product.name} - {item.quantity_to_print} Nos"
+                )
+                print_to_printer(kitchen_printer.ip_address, "\n".join(kitchen_text))
         # Mark items as printed and increment quantity_to_print by the difference
         new_items.update(
             quantity_to_print=0,
@@ -237,6 +252,9 @@ class OrderPrintNewItems(generics.GenericAPIView):
                 "shisha_text": (
                     shisha_text if shisha_text else _("No shisha to print.")
                 ),
+                "kitchen_text": (
+                    kitchen_text if kitchen_text else _("No food to print.")
+                ),
             },
             status=status.HTTP_200_OK,
         )
@@ -248,7 +266,6 @@ class OrderRemoveItems(generics.DestroyAPIView):
     serializer_class = OrderItemsSerializer
 
     def destroy(self, request, *args, **kwargs):
-        # Get the order_id from the URL parameters
         order_id = request.query_params.get("order_id")
         try:
             order = Order.objects.get(id=order_id)
@@ -259,9 +276,8 @@ class OrderRemoveItems(generics.DestroyAPIView):
             )
 
         items = request.data
-        removed_items = []  # To store removed items for potential use
+        removed_items = []  # Store removed product names
 
-        # Calculate the total to subtract for removed items
         removed_items_total = Decimal("0.00")
 
         for item_data in items:
@@ -276,22 +292,25 @@ class OrderRemoveItems(generics.DestroyAPIView):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-            # Find the order item
             order_item = OrderItems.objects.filter(order=order, product=product).first()
             if order_item:
                 if quantity_to_remove >= order_item.quantity:
-                    # Remove the item completely
+                    removed_items.append(
+                        order_item.product.name
+                    )  # Store product name before deleting
                     removed_items_total += order_item.sub_total
-                    removed_items.append(order_item)
                     order_item.delete()
                 else:
-                    # Reduce the quantity and update the remaining total
+                    removed_items.append(order_item.product.name)  # Store product name
                     removed_items_total += (
                         order_item.sub_total / order_item.quantity
                     ) * quantity_to_remove
                     order_item.quantity -= quantity_to_remove
                     order_item.remaining_quantity = max(
                         0, order_item.remaining_quantity - quantity_to_remove
+                    )
+                    order_item.quantity_to_print = max(
+                        0, order_item.quantity_to_print - quantity_to_remove
                     )
                     order_item.save()
             else:
@@ -300,27 +319,72 @@ class OrderRemoveItems(generics.DestroyAPIView):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-        # Recalculate final_total and VAT for the order
         order.final_total -= removed_items_total
-        if order.final_total < 0:
-            order.final_total = 0  # Ensure no negative totals
+        order.final_total = max(0, order.final_total)  # Ensure no negative totals
         order.vat = order.final_total - (order.final_total / Decimal("1.05"))
-        # Apply discount if applicable
         discount_value = order.discount.value if order.discount else Decimal("0.00")
-        # Calculate grand_total
-        order.grand_total = order.final_total - discount_value
-        # Ensure grand_total is non-negative (in case of large discounts)
-        if order.grand_total < Decimal("0.00"):
-            order.grand_total = Decimal("0.00")
+        order.grand_total = max(Decimal("0.00"), order.final_total - discount_value)
         order.save()
 
         return Response(
             {
                 "detail": _("Items removed from order successfully."),
-                "removed_items": [item.product.name for item in removed_items],
+                "removed_items": removed_items,  # Now this should contain product names
             },
             status=status.HTTP_200_OK,
         )
+
+
+# class ApplyDiscountToOrderView(generics.UpdateAPIView):
+#     serializer_class = OrderSerializer
+#     authentication_classes = [JWTAuthentication]
+#     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+#     permission_codename = "discount.add_discount"
+#     lookup_field = "id"
+
+#     def get_object(self):
+#         order_id = self.request.query_params.get("order_id")
+#         order = get_object_or_404(Order, id=order_id)
+#         return order
+
+#     def update(self, request, *args, **kwargs):
+#         order = self.get_object()
+#         discount_id = request.data.get(
+#             "discount_id"
+#         )  # Get discount ID from request data
+
+#         # Check if the order is already paid
+#         if order.is_paid:
+#             return Response(
+#                 {"detail": _("Cannot apply discount to a paid order")},
+#                 status=status.HTTP_400_BAD_REQUEST,
+#             )
+#         # Retrieve discount instance
+#         try:
+#             discount = Discount.objects.get(id=discount_id)
+#         except Discount.DoesNotExist:
+#             return Response(
+#                 {"detail": _("Discount not found")}, status=status.HTTP_404_NOT_FOUND
+#             )
+#         if discount:
+#             return Response(
+#                 {"detail": _("Discount already applied to this order")},
+#                 status=status.HTTP_400_BAD_REQUEST,
+#             )
+#         # Apply discount to the order
+#         order.discount = discount
+#         discount_value = discount.value if discount else Decimal("0.00")
+#         order.grand_total -= discount_value
+#         # Ensure total is not negative
+#         if order.grand_total < Decimal("0.00"):
+#             order.grand_total = Decimal("0.00")
+#         # Save updated order
+#         order.save()
+
+#         return Response(
+#             {"detail": _("Discount applied successfully")}, status=status.HTTP_200_OK
+#         )
+
 
 
 class ApplyDiscountToOrderView(generics.UpdateAPIView):
@@ -332,12 +396,10 @@ class ApplyDiscountToOrderView(generics.UpdateAPIView):
 
     def get_object(self):
         order_id = self.request.query_params.get("order_id")
-        order = get_object_or_404(Order, id=order_id)
-        return order
+        return get_object_or_404(Order, id=order_id)
 
     def update(self, request, *args, **kwargs):
         order = self.get_object()
-        discount_id = request.data.get("discount_id")  # Get discount ID from request data
 
         # Check if the order is already paid
         if order.is_paid:
@@ -345,26 +407,87 @@ class ApplyDiscountToOrderView(generics.UpdateAPIView):
                 {"detail": _("Cannot apply discount to a paid order")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        # Retrieve discount instance
-        try:
-            discount = Discount.objects.get(id=discount_id)
-        except Discount.DoesNotExist:
-            return Response({"detail": _("Discount not found")}, status=status.HTTP_404_NOT_FOUND)
-        # Apply discount to the order
+
+        # Get discount value and reason from request body
+        discount_value = Decimal(request.data.get("value", "0.00"))
+        discount_reason = request.data.get("discount_reason", None)
+
+        # Check if the order is associated with a table that is owned (is_owner=True)
+        if order.table and order.table.is_owner:
+            discount_value = order.final_total  # Set discount to full order total
+
+        # Ensure discount does not exceed order final total
+        discount_value = min(discount_value, order.final_total)
+
+        # Create a new discount record
+        discount = Discount.objects.create(
+            value=discount_value,
+            discount_reason=discount_reason,
+            created_by=request.user,
+            updated_by=request.user,
+        )
+
+        # Apply discount to order
         order.discount = discount
-        discount_value = discount.value if discount else Decimal("0.00")
-        order.grand_total -= discount_value
-        # Ensure total is not negative
-        if order.grand_total < Decimal("0.00"):
-            order.grand_total = Decimal("0.00")
+        order.grand_total = order.final_total - discount_value
+
+        # Ensure grand_total is not negative
+        order.grand_total = max(order.grand_total, Decimal("0.00"))
+
         # Save updated order
         order.save()
 
         return Response(
-            {"detail": _("Discount applied successfully")}, status=status.HTTP_200_OK
+            {"detail": _("Discount applied successfully")},
+            status=status.HTTP_200_OK,
         )
 
 
+class RemoveDiscountFromOrderView(generics.UpdateAPIView):
+    serializer_class = OrderSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
+    permission_codename = "discount.delete_discount"
+    lookup_field = "id"
+
+    def get_object(self):
+        order_id = self.request.query_params.get("order_id")
+        order = get_object_or_404(Order, id=order_id)
+        return order
+
+    def update(self, request, *args, **kwargs):
+        order = self.get_object()
+
+        # Check if the order is already paid
+        if order.is_paid:
+            return Response(
+                {"detail": _("Cannot remove discount from a paid order")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if a discount is applied to the order
+        if not order.discount:
+            return Response(
+                {"detail": _("No discount applied to this order")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Remove the discount and recalculate grand total
+        discount_value = order.discount.value
+        order.discount = None  # Remove the applied discount
+        order.grand_total += discount_value  # Recalculate the grand total by adding the discount value back
+
+        # Ensure total is not negative
+        if order.grand_total < Decimal("0.00"):
+            order.grand_total = Decimal("0.00")
+
+        # Save the updated order
+        order.save()
+
+        return Response(
+            {"detail": _("Discount removed and grand total recalculated successfully")},
+            status=status.HTTP_200_OK,
+        )
 
 class SplitBillView(generics.CreateAPIView):
     authentication_classes = [JWTAuthentication]
@@ -380,18 +503,17 @@ class SplitBillView(generics.CreateAPIView):
                 {"detail": _("Order not found.")},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
         if order.is_paid:
             return Response(
-                {
-                    "detail": _(
-                        "Can not split an order because it's already paid totally"
-                    )
-                },
+                {"detail": _("Cannot split an order because it's already fully paid.")},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        # Get items from the request body
+
+        # Get items and payment method from request
         items = request.data.get("items")
         payment_method = request.data.get("payment_method")
+
         if not items:
             return Response(
                 {"detail": _("Items are required.")},
@@ -400,71 +522,89 @@ class SplitBillView(generics.CreateAPIView):
 
         try:
             total_payment_amount = Decimal("0.00")
-            for item_data in items:
-                product_id = item_data.get("product")
-                quantity_to_pay = item_data.get("quantity")
+            with transaction.atomic():
+                for item_data in items:
+                    product_id = item_data.get("product")
+                    quantity_to_pay = item_data.get("quantity")
 
-                # Ensure product ID and quantity are provided
-                if not product_id or quantity_to_pay is None:
-                    return Response(
-                        {"detail": _("Product ID and quantity are required.")},
-                        status=status.HTTP_400_BAD_REQUEST,
+                    # Ensure product ID and quantity are provided
+                    if not product_id or quantity_to_pay is None:
+                        return Response(
+                            {"detail": _("Product ID and quantity are required.")},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    # Get the order item for the specified product and order
+                    order_item = OrderItems.objects.get(
+                        product__id=product_id, order=order
                     )
 
-                # Get the order item for the specified product and order
-                order_item = OrderItems.objects.get(product__id=product_id, order=order)
+                    # Validate quantity
+                    if quantity_to_pay > order_item.remaining_quantity:
+                        return Response(
+                            {
+                                "detail": _(
+                                    "Quantity exceeds remaining unpaid quantity."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
 
-                # Validate quantity
-                if quantity_to_pay > order_item.remaining_quantity:
-                    return Response(
-                        {"detail": _("Quantity exceeds remaining unpaid quantity.")},
-                        status=status.HTTP_400_BAD_REQUEST,
+                    # Calculate the amount for this item
+                    item_total = Decimal(quantity_to_pay) * order_item.product.price
+                    total_payment_amount += item_total
+
+                    # Decrease the remaining quantity
+                    order_item.remaining_quantity -= quantity_to_pay
+
+                    # Check if the item is fully paid
+                    if order_item.remaining_quantity == 0:
+                        order_item.is_paid = True
+
+                    # Recalculate the sub_total based on the updated remaining_quantity
+                    order_item.sub_total = (
+                        order_item.remaining_quantity * order_item.product.price
                     )
 
-                # Calculate the amount for this item
-                item_total = Decimal(quantity_to_pay) * order_item.product.price
-                total_payment_amount += item_total
+                    # Save the updated order item
+                    order_item.save()
 
-                # Decrease the remaining quantity
-                order_item.remaining_quantity -= quantity_to_pay
+                # Calculate VAT (assuming 5%)
+                vat = total_payment_amount - (total_payment_amount / Decimal("1.05"))
 
-                # Check if the item is fully paid
-                if order_item.remaining_quantity == 0:
-                    order_item.is_paid = True
-
-                # Recalculate the sub_total based on the updated remaining_quantity
-                order_item.sub_total = (
-                    order_item.remaining_quantity * order_item.product.price
+                # ✅ Create a payment record
+                payment = Payment.objects.create(
+                    amount=total_payment_amount,
+                    payment_method=payment_method,
+                    created_by=request.user,
                 )
 
-                # Save the updated order item
-                order_item.save()
+                # ✅ Associate the payment with the order using the M2M relationship
+                payment.orders.add(order)
 
-            # Calculate VAT based on the total
-            vat = total_payment_amount - (total_payment_amount / Decimal("1.05"))
+                # ✅ Recalculate order totals
+                self.recalculate_order(order)
 
-            # Create a payment record
-            payment = Payment.objects.create(
-                amount=total_payment_amount,
-                payment_method=payment_method,
-                created_by=request.user,
-            )
+                # ✅ Generate the formatted bill and save as PDF
+                formatted_bill, logo_path, pdf_path = format_bill(
+                    order, payment.id, total_payment_amount, vat, save_as_pdf=True
+                )
 
-            # Associate the payment with the order using the M2M relationship
-            payment.orders.add(order)
-
-            # Recalculate the order's total and VAT
-            self.recalculate_order(order)
-
-            # Generate the formatted bill
-            formatted_bill, logo_path = format_bill(
-                order, payment, total_payment_amount, vat
-            )
+                # ✅ Print the bill
+                cashier_printer = Printer.objects.filter(printer_type="cashier").first()
+                if cashier_printer:
+                    try:
+                        print_to_printer(
+                            cashier_printer.ip_address, formatted_bill, logo_path
+                        )
+                    except Exception as e:
+                        print(f"⚠️ Printing failed for order {order.id}: {e}")
 
             return Response(
                 {
                     "detail": _("Bill split successfully."),
                     "formatted_bill": formatted_bill,
+                    "pdf_path": request.build_absolute_uri(pdf_path),  # ✅ Include PDF path for record-keeping
                     "payment_id": payment.id,
                 },
                 status=status.HTTP_200_OK,
@@ -487,8 +627,9 @@ class SplitBillView(generics.CreateAPIView):
             )
 
     def recalculate_order(self, order):
-        # Recalculate the final_total
+        """Recalculates order totals after splitting a bill."""
         order_items = OrderItems.objects.filter(order=order)
+
         final_total = sum(
             (
                 Decimal(item.remaining_quantity) * item.product.price
@@ -496,23 +637,23 @@ class SplitBillView(generics.CreateAPIView):
             )
         )
 
-        # Calculate VAT as per the given formula
-        vat = final_total - (final_total / Decimal("1.05"))  # Assuming VAT is 5%
+        # ✅ Calculate VAT (assuming 5%)
+        vat = final_total - (final_total / Decimal("1.05"))
 
-        # Update the order with the new values
+        # ✅ Apply discount if applicable
+        discount_value = order.discount.value if order.discount else Decimal("0.00")
+
+        # ✅ Update order totals
         order.final_total = final_total
         order.vat = vat.quantize(Decimal("0.01"))  # Round to 2 decimal places
-        # Apply discount if applicable
-        discount_value = order.discount.value if order.discount else Decimal("0.00")
-        # Calculate grand_total
-        order.grand_total = order.final_total - discount_value
-        # Ensure grand_total is non-negative (in case of large discounts)
-        if order.grand_total < Decimal("0.00"):
-            order.grand_total = Decimal("0.00")
-        # Check if all items are paid
+        order.grand_total = max(
+            order.final_total - discount_value, Decimal("0.00")
+        )  # Ensure non-negative
+
+        # ✅ Mark order as fully paid if all items are paid
         if all(item.is_paid for item in order_items):
             order.is_paid = True
-            order.check_out_time = now()  # Set checkout time to current timestamp
+            order.check_out_time = now()  # Store checkout time
 
         order.save()
 
@@ -550,7 +691,7 @@ class CheckoutOrderView(generics.UpdateAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Save payment and update order status
+        # ✅ Save payment and update order status
         with transaction.atomic():
             payment = Payment.objects.create(
                 amount=grand_total,
@@ -558,26 +699,39 @@ class CheckoutOrderView(generics.UpdateAPIView):
                 created_by=request.user,
             )
             payment.orders.add(order)
-            # Mark all order items as paid and set remaining_quantity to zero
+
+            # ✅ Mark all order items as paid and set remaining_quantity to zero
             order_items = OrderItems.objects.filter(order=order)
             for item in order_items:
                 item.is_paid = True
                 item.remaining_quantity = 0
                 item.save()
+
             order.is_paid = True
             order.check_out_time = now()  # Set checkout time to current timestamp
-
             order.save()
+
         total_payment_amount = order.grand_total
         vat = order.vat
-        # Generate the bill with Payment ID as Invoice No
-        formatted_bill, logo_path = format_bill(
-            order, payment.id, total_payment_amount, vat
+
+        # ✅ Generate the bill and save as PDF
+        formatted_bill, logo_path, pdf_path = format_bill(
+            order, payment.id, total_payment_amount, vat, save_as_pdf=True
         )
 
+        # ✅ Get cashier printer
+        cashier_printer = Printer.objects.filter(printer_type="cashier").first()
+        if cashier_printer:
+            try:
+                print_to_printer(cashier_printer.ip_address, formatted_bill, logo_path)
+            except Exception as e:
+                print(f" Failed to print order {order.id}: {e}")
+
+        # ✅ Prepare API response
         response_data = {
             "detail": _("Order checked out and payment recorded successfully."),
             "bill": formatted_bill,
+            "pdf_path": request.build_absolute_uri(pdf_path),  # ✅ Include PDF path in response
         }
         if logo_path:
             response_data["logo"] = logo_path
@@ -630,6 +784,15 @@ class GroupBillsView(generics.CreateAPIView):
                 payment.orders.set(orders)
 
                 formatted_bills = []
+                pdf_paths = []
+
+                # ✅ Get cashier printer
+                cashier_printer = Printer.objects.filter(printer_type="cashier").first()
+                if not cashier_printer:
+                    return Response(
+                        {"error": _("No cashier printer found.")}, status=400
+                    )
+
                 for order in orders:
                     # Fetch and update all associated OrderItems
                     order_items = OrderItems.objects.filter(order=order)
@@ -641,11 +804,20 @@ class GroupBillsView(generics.CreateAPIView):
                     order.check_out_time = now()  # Store checkout time
                     order.save()
 
-                    # Generate the bill
-                    formatted_bill, logo_path = format_bill(
-                        order, payment, total_payment_amount, vat
+                    # ✅ Generate the bill and save as PDF
+                    formatted_bill, logo_path, pdf_path = format_bill(
+                        order, payment.id, total_payment_amount, vat, save_as_pdf=True
                     )
                     formatted_bills.append(formatted_bill)
+                    pdf_paths.append(pdf_path)
+
+                    # ✅ Print each bill (wrapped in a try-except block)
+                    try:
+                        print_to_printer(
+                            cashier_printer.ip_address, formatted_bill, logo_path
+                        )
+                    except Exception as e:
+                        print(f"Failed to print order {order.id}: {e}")
 
                 combined_bill = "\n\n".join(formatted_bills)
 
@@ -653,6 +825,7 @@ class GroupBillsView(generics.CreateAPIView):
                 {
                     "detail": _("Group bills processed successfully."),
                     "combined_bill": combined_bill,
+                    "pdf_paths": request.build_absolute_uri(pdf_path),  # ✅ Return list of generated PDFs
                     "logo": logo_path if logo_path else None,
                 },
                 status=200,

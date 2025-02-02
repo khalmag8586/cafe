@@ -14,6 +14,8 @@ class OrderItemsSerializer(serializers.ModelSerializer):
 
     product_name = serializers.CharField(source="product.name", read_only=True)
     product_name_ar = serializers.CharField(source="product.name_ar", read_only=True)
+    product_price = serializers.CharField(source="product.price", read_only=True)
+    product_image = serializers.CharField(source="product.photo", read_only=True)
 
     class Meta:
         model = OrderItems
@@ -23,6 +25,8 @@ class OrderItemsSerializer(serializers.ModelSerializer):
             "product",
             "product_name",
             "product_name_ar",
+            "product_price",
+            "product_image",
             "quantity",
             "remaining_quantity",
             "is_paid",
@@ -103,7 +107,7 @@ class OrderSerializer(serializers.ModelSerializer):
         ]
 
     def get_created_at(self, obj):
-        return obj.created_at.strftime("%Y-%m-%d--%H-%M-%S")
+        return obj.created_at.strftime("%Y-%m-%d")
 
     def get_updated_at(self, obj):
         return obj.updated_at.strftime("%Y-%m-%d--%H-%M-%S")
