@@ -127,7 +127,11 @@ def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
         )
     )
     bill_text.append("=" * 45)
-
+    # Table Header
+    bill_text.append(
+        "{:<20} {:>6} {:>8} {:>10}".format("Item - UOM", "Qty", "Price", "Value")
+    )
+    bill_text.append("-" * 45)
     # Order Items (unchanged)
     for item_data in order.order_items.all():
         product_name = item_data.product.name
