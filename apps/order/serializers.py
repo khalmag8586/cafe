@@ -28,6 +28,7 @@ class OrderItemsSerializer(serializers.ModelSerializer):
             "product_price",
             "product_image",
             "quantity",
+            "notes",
             "remaining_quantity",
             "is_paid",
             "quantity_to_print",
@@ -96,6 +97,7 @@ class OrderSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "order_number",
+            "hall",
             "final_total",
             "created_at",
             "updated_at",

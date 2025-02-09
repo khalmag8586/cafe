@@ -145,7 +145,7 @@ class NestedCategorySerializer(serializers.ModelSerializer):
         fields = ["id", "name", "name_ar", "slug", "image", "children"]
 
     def get_children(self, obj):
-        children = Category.objects.filter(parent=obj)
+        children = Category.objects.filter(parent=obj).order_by("-created_at")
         serializer = NestedCategorySerializer(children, many=True, context=self.context)
         return serializer.data
     def get_image_url(self, obj):

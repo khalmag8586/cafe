@@ -10,6 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter, OrderingFilter
+from rest_framework.views import APIView
 from rest_framework import (
     generics,
     status,
@@ -17,10 +18,12 @@ from rest_framework import (
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from apps.table.models import Table
+from apps.table.filters import TableFilter
 from apps.table.serializers import (
     TableSerializer,
     TableActiveSerializer,
     TableCurrentOrderDialogSerializer,
+    TableHalleDialogSerializer,
 )
 
 from cafe.custom_permissions import HasPermissionOrInGroupWithPermission
@@ -57,7 +60,8 @@ class TableListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "table.view_table"
     pagination_class = StandardResultsSetPagination
-
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class=TableFilter
 
 class TableAvailableListView(generics.ListAPIView):
     queryset = Table.objects.filter(is_occupied=False).order_by("table_number")
@@ -66,7 +70,8 @@ class TableAvailableListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "table.view_table"
     pagination_class = StandardResultsSetPagination
-
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class=TableFilter
 
 class TableActiveListView(generics.ListAPIView):
     queryset = Table.objects.filter(is_active=True).order_by("table_number")
@@ -75,7 +80,8 @@ class TableActiveListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "table.view_table"
     pagination_class = StandardResultsSetPagination
-
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class=TableFilter
 
 class TableInActiveListView(generics.ListAPIView):
     queryset = Table.objects.filter(is_active=False).order_by("table_number")
@@ -84,7 +90,8 @@ class TableInActiveListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "table.view_table"
     pagination_class = StandardResultsSetPagination
-
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class=TableFilter
 
 class TableOccupiedListView(generics.ListAPIView):
     queryset = Table.objects.filter(is_occupied=True).order_by("table_number")
@@ -93,7 +100,8 @@ class TableOccupiedListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "table.view_table"
     pagination_class = StandardResultsSetPagination
-
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class=TableFilter
 
 class TableRetrieveView(generics.RetrieveAPIView):
     serializer_class = TableSerializer
@@ -190,3 +198,18 @@ class TableCurrentOrderDialogView(generics.ListAPIView):
     queryset = Table.objects.filter(is_active=True, is_occupied=True).order_by(
         "table_number"
     )
+
+
+class TableHallDialogView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        hall_choices = [
+            {"value": "main", "display": _("Main")},
+            {"value": "family", "display": _("Family")},
+            {"value": "outdoor", "display": _("Outdoor")},
+        ]
+
+        serializer = TableHalleDialogSerializer(hall_choices, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

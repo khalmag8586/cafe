@@ -43,8 +43,8 @@ class Product(models.Model):
         null=True,
         on_delete=models.SET_NULL,
     )
-    name = models.CharField(max_length=255, unique=True)
-    name_ar = models.CharField(max_length=255, unique=True)
+    name = models.CharField(max_length=255)
+    name_ar = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, allow_unicode=True, unique=True)
     description = models.TextField(blank=True, null=True)
     price=models.DecimalField(max_digits=10, decimal_places=2)

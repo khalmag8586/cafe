@@ -26,6 +26,7 @@ class TableSerializer(serializers.ModelSerializer):
             "id",
             "table_number",
             "no_of_pax",
+            "hall",
             "is_occupied",
             "is_owner",
             "is_active",
@@ -76,3 +77,8 @@ class TableCurrentOrderDialogSerializer(serializers.ModelSerializer):
             if current_order:
                 return current_order.id
         return "N/A"
+
+
+class TableHalleDialogSerializer(serializers.Serializer):
+    value = serializers.CharField()
+    display = serializers.CharField()

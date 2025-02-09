@@ -2,10 +2,15 @@ from django.shortcuts import get_object_or_404
 from django.utils.translation import gettext_lazy as _
 from django.db import transaction
 from django.db.models import Sum
+from django.utils.timezone import now
+from django.conf import settings
+from django.http import FileResponse, Http404
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, generics
+from rest_framework.generics import GenericAPIView
+
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -32,17 +37,19 @@ from apps.order.serializers import (
 )
 from apps.order.filters import OrderFilter, PaymentFilter
 from apps.printer.models import Printer
+from apps.category.models import Category
 
 from cafe.pagination import StandardResultsSetPagination
 from cafe.custom_permissions import HasPermissionOrInGroupWithPermission
 from cafe.util import (
     print_to_printer,
     format_bill,
+    split_format_bill,
+    group_format_bill,
 )
 
 from decimal import Decimal
-
-from django.utils.timezone import now
+import os
 
 
 # Order Views
@@ -97,7 +104,7 @@ class OrderAddMoreItems(generics.CreateAPIView):
         for item_data in items:
             product_id = item_data.get("product")
             quantity = int(item_data.get("quantity", 1))  # Default quantity to 1
-
+            notes = item_data.get("notes")
             try:
                 product = Product.objects.get(id=product_id)
             except Product.DoesNotExist:
@@ -111,6 +118,7 @@ class OrderAddMoreItems(generics.CreateAPIView):
             if order_item:
                 # Update the quantity and remaining_quantity
                 order_item.quantity += quantity
+                order_item.notes = notes
                 order_item.remaining_quantity += quantity  # Add to remaining_quantity
                 order_item.quantity_to_print += quantity  # Add to quantity_to_print
                 order_item.is_printed = False
@@ -121,6 +129,7 @@ class OrderAddMoreItems(generics.CreateAPIView):
                 order_item = OrderItems.objects.create(
                     order=order,
                     product=product,
+                    notes=notes,
                     quantity=quantity,
                     remaining_quantity=quantity,  # Initialize remaining_quantity
                     quantity_to_print=quantity,
@@ -151,9 +160,198 @@ class OrderAddMoreItems(generics.CreateAPIView):
         )
 
 
+# class OrderPrintNewItems(generics.GenericAPIView):
+#     authentication_classes = [JWTAuthentication]
+#     permission_classes = [IsAuthenticated]
+
+#     def post(self, request, *args, **kwargs):
+#         order_id = request.query_params.get("order_id")
+#         try:
+#             order = Order.objects.get(id=order_id)
+#         except Order.DoesNotExist:
+#             return Response(
+#                 {"detail": _("Order does not exist.")},
+#                 status=status.HTTP_404_NOT_FOUND,
+#             )
+
+#         # Get unprinted items
+#         new_items = OrderItems.objects.filter(order=order, is_printed=False)
+#         for item in new_items:
+#             print(
+#                 f"Product: {item.product.name}, Category Type: {type(item.product.category)}"
+#             )
+#             print(f"Category Data: {item.product.category}")
+
+#         if not new_items.exists():
+#             return Response(
+#                 {"detail": _("No new items to print.")},
+#                 status=status.HTTP_400_BAD_REQUEST,
+#             )
+
+#         # Fetch the printers
+#         barista_printer = Printer.objects.filter(printer_type="barista").first()
+#         shisha_printer = Printer.objects.filter(printer_type="shisha").first()
+#         kitchen_printer = Printer.objects.filter(printer_type="kitchen").first()
+#         # Group items by category
+#         barista_items = [
+#             item
+#             for item in new_items
+#             if item.product.category.all()
+#             and any(c.name.lower() == "drinks" for c in item.product.category.all())
+#         ]
+#         shisha_items = [
+#             item
+#             for item in new_items
+#             if item.product.category.all()
+#             and any(c.name.lower() == "shisha" for c in item.product.category.all())
+#         ]
+#         kitchen_items = [
+#             item
+#             for item in new_items
+#             if item.product.category.all()
+#             and any(c.name.lower() == "food" for c in item.product.category.all())
+#         ]
+
+#         # Initialize barista_text and shisha_text to avoid UnboundLocalError
+#         barista_text = []
+#         shisha_text = []
+#         kitchen_text = []
+#         # Print for barista
+#         if barista_printer and barista_items:
+#             barista_text.append("New Drinks Order:")
+#             barista_text.append(f"Order No: {order.id}")
+#             barista_text.append("")
+#             for item in barista_items:
+#                 barista_text.append(
+#                     f"{item.product.name} - {item.quantity_to_print} Nos"
+
+#                 )
+#                 barista_text.append(f"Notes: {item.notes}")# adding notes for each item
+
+#             print_to_printer(barista_printer.ip_address, "\n".join(barista_text))
+
+#         # Print for shisha
+#         if shisha_printer and shisha_items:
+#             shisha_text.append("New Shisha Order:")
+#             shisha_text.append(f"Order No: {order.id}")
+#             shisha_text.append("")
+#             for item in shisha_items:
+#                 shisha_text.append(
+#                     f"{item.product.name} - {item.quantity_to_print} Nos"
+#                 )
+#                 shisha_text.append(f"Notes: {item.notes}")# adding notes for each item
+
+#             print_to_printer(shisha_printer.ip_address, "\n".join(shisha_text))
+#         # print for food
+#         if kitchen_printer and kitchen_items:
+#             kitchen_text.append("New Food Order:")
+#             kitchen_text.append(f"Order No: {order.id}")
+#             kitchen_text.append("")
+#             for item in kitchen_items:
+#                 kitchen_text.append(
+#                     f"{item.product.name} - {item.quantity_to_print} Nos"
+#                 )
+#                 kitchen_text.append(f"Notes: {item.notes}")# adding notes for each item
+
+
+#                 print_to_printer(kitchen_printer.ip_address, "\n".join(kitchen_text))
+#         # Mark items as printed and increment quantity_to_print by the difference
+#         new_items.update(
+#             quantity_to_print=0,
+#             is_printed=True,
+#         )
+#         return Response(
+#             {
+#                 "detail": _("New items printed successfully."),
+#                 "barista_text": (
+#                     barista_text if barista_text else _("No drinks to print.")
+#                 ),
+#                 "shisha_text": (
+#                     shisha_text if shisha_text else _("No shisha to print.")
+#                 ),
+#                 "kitchen_text": (
+#                     kitchen_text if kitchen_text else _("No food to print.")
+#                 ),
+#             },
+#             status=status.HTTP_200_OK,
+#         )
+class OrderItemNote(generics.UpdateAPIView):
+    queryset = OrderItems.objects.all()
+    serializer_class = OrderItemsSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    lookup_field = "id"
+
+    def get_object(self):
+        order_item_id = self.request.query_params.get("order_item_id")
+        order_item = get_object_or_404(OrderItems, id=order_item_id)
+        return order_item
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        return Response(
+            {"detail": _("Notes updated successfully")}, status=status.HTTP_200_OK
+        )
+
+
 class OrderPrintNewItems(generics.GenericAPIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_all_categories(self, category):
+        """Recursively fetch all parent and child categories."""
+        categories = set()
+        categories.add(category)
+
+        # Get all parent categories
+        parent = category.parent
+        while parent:
+            categories.add(parent)
+            print(f"Found parent: {parent.name}")
+            parent = parent.parent
+
+        # Get all child categories
+        def get_children(cat):
+            children = Category.objects.filter(parent=cat)
+            for child in children:
+                categories.add(child)
+                print(f"Found child: {child.name}")
+                get_children(child)
+
+        get_children(category)
+
+        print(
+            f"Final category set for '{category.name}': {[c.name for c in categories]}"
+        )
+        return categories
+
+    def category_matches(self, item, target_category_name):
+        """Check if a product belongs to a category or any of its subcategories."""
+        target_category_name = target_category_name.lower()  # Normalize input
+
+        for category in item.product.category.all():
+            all_categories = self.get_all_categories(category)  # Fetch full hierarchy
+
+            # Debugging output: Print all category names being checked
+            print(
+                f"Checking item '{item.product.name}' against category '{target_category_name}'"
+            )
+            print("All related categories:", [c.name.lower() for c in all_categories])
+
+            if any(c.name.lower() == target_category_name for c in all_categories):
+                print(f" Match found: '{target_category_name}' in {category.name}")
+                return True
+
+        print(f" No match for '{target_category_name}' in item '{item.product.name}'")
+        return False
 
     def post(self, request, *args, **kwargs):
         order_id = request.query_params.get("order_id")
@@ -167,11 +365,6 @@ class OrderPrintNewItems(generics.GenericAPIView):
 
         # Get unprinted items
         new_items = OrderItems.objects.filter(order=order, is_printed=False)
-        for item in new_items:
-            print(
-                f"Product: {item.product.name}, Category Type: {type(item.product.category)}"
-            )
-            print(f"Category Data: {item.product.category}")
 
         if not new_items.exists():
             return Response(
@@ -183,30 +376,21 @@ class OrderPrintNewItems(generics.GenericAPIView):
         barista_printer = Printer.objects.filter(printer_type="barista").first()
         shisha_printer = Printer.objects.filter(printer_type="shisha").first()
         kitchen_printer = Printer.objects.filter(printer_type="kitchen").first()
-        # Group items by category
+
+        # Group items by category, including subcategories
         barista_items = [
-            item
-            for item in new_items
-            if item.product.category.all()
-            and any(c.name.lower() == "drinks" for c in item.product.category.all())
+            item for item in new_items if self.category_matches(item, "drinks")
         ]
         shisha_items = [
-            item
-            for item in new_items
-            if item.product.category.all()
-            and any(c.name.lower() == "shisha" for c in item.product.category.all())
+            item for item in new_items if self.category_matches(item, "shisha")
         ]
         kitchen_items = [
-            item
-            for item in new_items
-            if item.product.category.all()
-            and any(c.name.lower() == "food" for c in item.product.category.all())
+            item for item in new_items if self.category_matches(item, "food")
         ]
 
-        # Initialize barista_text and shisha_text to avoid UnboundLocalError
-        barista_text = []
-        shisha_text = []
-        kitchen_text = []
+        # Prepare text output for each category
+        barista_text, shisha_text, kitchen_text = [], [], []
+
         # Print for barista
         if barista_printer and barista_items:
             barista_text.append("New Drinks Order:")
@@ -216,6 +400,7 @@ class OrderPrintNewItems(generics.GenericAPIView):
                 barista_text.append(
                     f"{item.product.name} - {item.quantity_to_print} Nos"
                 )
+                barista_text.append(f"Notes: {item.notes}")
             print_to_printer(barista_printer.ip_address, "\n".join(barista_text))
 
         # Print for shisha
@@ -227,8 +412,10 @@ class OrderPrintNewItems(generics.GenericAPIView):
                 shisha_text.append(
                     f"{item.product.name} - {item.quantity_to_print} Nos"
                 )
+                shisha_text.append(f"Notes: {item.notes}")
             print_to_printer(shisha_printer.ip_address, "\n".join(shisha_text))
-        # print for food
+
+        # Print for food
         if kitchen_printer and kitchen_items:
             kitchen_text.append("New Food Order:")
             kitchen_text.append(f"Order No: {order.id}")
@@ -237,21 +424,22 @@ class OrderPrintNewItems(generics.GenericAPIView):
                 kitchen_text.append(
                     f"{item.product.name} - {item.quantity_to_print} Nos"
                 )
-                print_to_printer(kitchen_printer.ip_address, "\n".join(kitchen_text))
-        # Mark items as printed and increment quantity_to_print by the difference
+                kitchen_text.append(f"Notes: {item.notes}")
+            print_to_printer(kitchen_printer.ip_address, "\n".join(kitchen_text))
+
+        # Mark items as printed and reset `quantity_to_print`
         new_items.update(
             quantity_to_print=0,
             is_printed=True,
         )
+
         return Response(
             {
                 "detail": _("New items printed successfully."),
                 "barista_text": (
                     barista_text if barista_text else _("No drinks to print.")
                 ),
-                "shisha_text": (
-                    shisha_text if shisha_text else _("No shisha to print.")
-                ),
+                "shisha_text": shisha_text if shisha_text else _("No shisha to print."),
                 "kitchen_text": (
                     kitchen_text if kitchen_text else _("No food to print.")
                 ),
@@ -333,58 +521,6 @@ class OrderRemoveItems(generics.DestroyAPIView):
             },
             status=status.HTTP_200_OK,
         )
-
-
-# class ApplyDiscountToOrderView(generics.UpdateAPIView):
-#     serializer_class = OrderSerializer
-#     authentication_classes = [JWTAuthentication]
-#     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
-#     permission_codename = "discount.add_discount"
-#     lookup_field = "id"
-
-#     def get_object(self):
-#         order_id = self.request.query_params.get("order_id")
-#         order = get_object_or_404(Order, id=order_id)
-#         return order
-
-#     def update(self, request, *args, **kwargs):
-#         order = self.get_object()
-#         discount_id = request.data.get(
-#             "discount_id"
-#         )  # Get discount ID from request data
-
-#         # Check if the order is already paid
-#         if order.is_paid:
-#             return Response(
-#                 {"detail": _("Cannot apply discount to a paid order")},
-#                 status=status.HTTP_400_BAD_REQUEST,
-#             )
-#         # Retrieve discount instance
-#         try:
-#             discount = Discount.objects.get(id=discount_id)
-#         except Discount.DoesNotExist:
-#             return Response(
-#                 {"detail": _("Discount not found")}, status=status.HTTP_404_NOT_FOUND
-#             )
-#         if discount:
-#             return Response(
-#                 {"detail": _("Discount already applied to this order")},
-#                 status=status.HTTP_400_BAD_REQUEST,
-#             )
-#         # Apply discount to the order
-#         order.discount = discount
-#         discount_value = discount.value if discount else Decimal("0.00")
-#         order.grand_total -= discount_value
-#         # Ensure total is not negative
-#         if order.grand_total < Decimal("0.00"):
-#             order.grand_total = Decimal("0.00")
-#         # Save updated order
-#         order.save()
-
-#         return Response(
-#             {"detail": _("Discount applied successfully")}, status=status.HTTP_200_OK
-#         )
-
 
 
 class ApplyDiscountToOrderView(generics.UpdateAPIView):
@@ -489,6 +625,7 @@ class RemoveDiscountFromOrderView(generics.UpdateAPIView):
             status=status.HTTP_200_OK,
         )
 
+
 class SplitBillView(generics.CreateAPIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
@@ -572,25 +709,44 @@ class SplitBillView(generics.CreateAPIView):
                 # Calculate VAT (assuming 5%)
                 vat = total_payment_amount - (total_payment_amount / Decimal("1.05"))
 
-                # ✅ Create a payment record
+                #  Create a payment record
                 payment = Payment.objects.create(
                     amount=total_payment_amount,
                     payment_method=payment_method,
                     created_by=request.user,
                 )
 
-                # ✅ Associate the payment with the order using the M2M relationship
+                #  Associate the payment with the order using the M2M relationship
                 payment.orders.add(order)
 
-                # ✅ Recalculate order totals
+                #  Recalculate order totals
                 self.recalculate_order(order)
 
-                # ✅ Generate the formatted bill and save as PDF
-                formatted_bill, logo_path, pdf_path = format_bill(
-                    order, payment.id, total_payment_amount, vat, save_as_pdf=True
+                #
+                # Collect selected items data
+                selected_items = []
+                for item_data in items:
+                    product_id = item_data.get("product")
+                    quantity_to_pay = item_data.get("quantity")
+                    order_item = OrderItems.objects.get(
+                        product__id=product_id, order=order
+                    )
+
+                    selected_items.append(
+                        {"product": order_item.product, "quantity": quantity_to_pay}
+                    )
+
+                # Generate the formatted bill for the selected items
+                formatted_bill, logo_path, pdf_path = split_format_bill(
+                    order,
+                    payment.id,
+                    selected_items,
+                    total_payment_amount,
+                    vat,
+                    save_as_pdf=True,
                 )
 
-                # ✅ Print the bill
+                #  Print the bill
                 cashier_printer = Printer.objects.filter(printer_type="cashier").first()
                 if cashier_printer:
                     try:
@@ -598,13 +754,15 @@ class SplitBillView(generics.CreateAPIView):
                             cashier_printer.ip_address, formatted_bill, logo_path
                         )
                     except Exception as e:
-                        print(f"⚠️ Printing failed for order {order.id}: {e}")
+                        print(f" Printing failed for order {order.id}: {e}")
 
             return Response(
                 {
                     "detail": _("Bill split successfully."),
                     "formatted_bill": formatted_bill,
-                    "pdf_path": request.build_absolute_uri(pdf_path),  # ✅ Include PDF path for record-keeping
+                    "pdf_path": request.build_absolute_uri(
+                        pdf_path
+                    ),  # Include PDF path for record-keeping
                     "payment_id": payment.id,
                 },
                 status=status.HTTP_200_OK,
@@ -637,25 +795,74 @@ class SplitBillView(generics.CreateAPIView):
             )
         )
 
-        # ✅ Calculate VAT (assuming 5%)
+        # Calculate VAT (assuming 5%)
         vat = final_total - (final_total / Decimal("1.05"))
 
-        # ✅ Apply discount if applicable
+        #  Apply discount if applicable
         discount_value = order.discount.value if order.discount else Decimal("0.00")
 
-        # ✅ Update order totals
+        #  Update order totals
         order.final_total = final_total
         order.vat = vat.quantize(Decimal("0.01"))  # Round to 2 decimal places
         order.grand_total = max(
             order.final_total - discount_value, Decimal("0.00")
         )  # Ensure non-negative
 
-        # ✅ Mark order as fully paid if all items are paid
+        #  Mark order as fully paid if all items are paid
         if all(item.is_paid for item in order_items):
             order.is_paid = True
             order.check_out_time = now()  # Store checkout time
 
         order.save()
+
+
+class GenerateBillView(generics.RetrieveAPIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    queryset = Order.objects.filter(is_paid=False)
+    serializer_class = OrderSerializer
+
+    def get_object(self):
+        order_id = self.request.query_params.get("order_id")
+        return get_object_or_404(Order, id=order_id)
+
+    def retrieve(self, request, *args, **kwargs):
+        order = self.get_object()
+
+        if order.is_paid:
+            return Response(
+                {"detail": _("Order has already been checked out.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        total_payment_amount = order.grand_total
+        vat = order.vat
+
+        if total_payment_amount is None:
+            return Response(
+                {"detail": _("Grand total is missing for the order.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Generate the bill
+        formatted_bill, logo_path, pdf_path = format_bill(
+            order, None, total_payment_amount, vat, save_as_pdf=True
+        )
+
+        # Optionally print the bill
+        cashier_printer = Printer.objects.filter(printer_type="cashier").first()
+        if cashier_printer:
+            try:
+                print_to_printer(cashier_printer.ip_address, formatted_bill, logo_path)
+            except Exception as e:
+                print(f"Failed to print order {order.id}: {e}")
+
+        response_data = {
+            "detail": _("Bill generated successfully."),
+            "bill": formatted_bill,
+            "pdf_path": request.build_absolute_uri(pdf_path),
+        }
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class CheckoutOrderView(generics.UpdateAPIView):
@@ -691,7 +898,18 @@ class CheckoutOrderView(generics.UpdateAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ✅ Save payment and update order status
+        #  Retrieve order items before modifying them
+        order_items = list(OrderItems.objects.filter(order=order))  # Get a list before updating
+
+        total_payment_amount = order.grand_total
+        vat = order.vat
+
+        #  Generate the bill **before** modifying the order items
+        formatted_bill, logo_path, pdf_path = format_bill(
+            order, None, total_payment_amount, vat, save_as_pdf=True
+        )
+
+        #  Save payment and update order status
         with transaction.atomic():
             payment = Payment.objects.create(
                 amount=grand_total,
@@ -700,8 +918,7 @@ class CheckoutOrderView(generics.UpdateAPIView):
             )
             payment.orders.add(order)
 
-            # ✅ Mark all order items as paid and set remaining_quantity to zero
-            order_items = OrderItems.objects.filter(order=order)
+            # Now update the order items after generating the bill
             for item in order_items:
                 item.is_paid = True
                 item.remaining_quantity = 0
@@ -711,27 +928,19 @@ class CheckoutOrderView(generics.UpdateAPIView):
             order.check_out_time = now()  # Set checkout time to current timestamp
             order.save()
 
-        total_payment_amount = order.grand_total
-        vat = order.vat
-
-        # ✅ Generate the bill and save as PDF
-        formatted_bill, logo_path, pdf_path = format_bill(
-            order, payment.id, total_payment_amount, vat, save_as_pdf=True
-        )
-
-        # ✅ Get cashier printer
+        #  Get cashier printer
         cashier_printer = Printer.objects.filter(printer_type="cashier").first()
         if cashier_printer:
             try:
                 print_to_printer(cashier_printer.ip_address, formatted_bill, logo_path)
             except Exception as e:
-                print(f" Failed to print order {order.id}: {e}")
+                print(f"Failed to print order {order.id}: {e}")
 
-        # ✅ Prepare API response
+        #  Prepare API response
         response_data = {
             "detail": _("Order checked out and payment recorded successfully."),
             "bill": formatted_bill,
-            "pdf_path": request.build_absolute_uri(pdf_path),  # ✅ Include PDF path in response
+            "pdf_path": request.build_absolute_uri(pdf_path),
         }
         if logo_path:
             response_data["logo"] = logo_path
@@ -780,13 +989,13 @@ class GroupBillsView(generics.CreateAPIView):
                     created_by=request.user,
                 )
 
-                # ✅ Link all orders to this payment
+                #  Link all orders to this payment
                 payment.orders.set(orders)
 
                 formatted_bills = []
                 pdf_paths = []
 
-                # ✅ Get cashier printer
+                #  Get cashier printer
                 cashier_printer = Printer.objects.filter(printer_type="cashier").first()
                 if not cashier_printer:
                     return Response(
@@ -804,14 +1013,15 @@ class GroupBillsView(generics.CreateAPIView):
                     order.check_out_time = now()  # Store checkout time
                     order.save()
 
-                    # ✅ Generate the bill and save as PDF
-                    formatted_bill, logo_path, pdf_path = format_bill(
-                        order, payment.id, total_payment_amount, vat, save_as_pdf=True
+                    # Generate the combined bill for all orders
+                    formatted_bill, logo_path, pdf_path = group_format_bill(
+                        orders, payment.id, total_payment_amount, vat, save_as_pdf=True
                     )
+
                     formatted_bills.append(formatted_bill)
                     pdf_paths.append(pdf_path)
 
-                    # ✅ Print each bill (wrapped in a try-except block)
+                    #  Print each bill (wrapped in a try-except block)
                     try:
                         print_to_printer(
                             cashier_printer.ip_address, formatted_bill, logo_path
@@ -825,7 +1035,9 @@ class GroupBillsView(generics.CreateAPIView):
                 {
                     "detail": _("Group bills processed successfully."),
                     "combined_bill": combined_bill,
-                    "pdf_paths": request.build_absolute_uri(pdf_path),  # ✅ Return list of generated PDFs
+                    "pdf_paths": request.build_absolute_uri(
+                        pdf_path
+                    ),  #  Return list of generated PDFs
                     "logo": logo_path if logo_path else None,
                 },
                 status=200,
@@ -833,6 +1045,28 @@ class GroupBillsView(generics.CreateAPIView):
 
         except Exception as e:
             return Response({"error": str(e)}, status=500)
+
+
+class FetchInvoiceView(GenericAPIView):
+    def get(self, request, *args, **kwargs):
+        # Extract the invoice ID from query parameters
+        invoice_id = request.query_params.get("invoice_id")
+        if not invoice_id:
+            return Response({"detail": _("Invoice ID is required.")}, status=400)
+
+        # Define the path to the invoices folder
+        invoice_folder = os.path.join(settings.MEDIA_ROOT, "uploads", "bills")
+
+        # Generate the expected file name
+        filename = f"invoice_{invoice_id}.pdf"
+        file_path = os.path.join(invoice_folder, filename)
+
+        # Check if the file exists
+        if not os.path.exists(file_path):
+            raise Http404("Invoice not found.")
+
+        # Serve the file as a response
+        return FileResponse(open(file_path, "rb"), content_type="application/pdf")
 
 
 class OrderUnpaidListView(generics.ListAPIView):

@@ -17,68 +17,8 @@ from PIL import Image
 from decimal import Decimal
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
-import textwrap
-
-
-# def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
-#     bill_text = []
-#     bill_text.append("TAX INVOICE")
-#     bill_text.append("Coffee Shop Co. L.L.C")
-#     bill_text.append("Shop 1, Block A")
-#     bill_text.append("Abraj Al Mamzar")
-#     bill_text.append("Dubai, UAE")
-#     bill_text.append("Ct: 0547606099 / 0559803445")
-#     bill_text.append(f"TRN: 104340270800001")
-#     bill_text.append("")
-#     bill_text.append("Duplicate Bill")
-#     bill_text.append("")
-
-#     # Payment ID as Invoice No, Order ID as KOT No
-#     bill_text.append(f"Invoice No: {payment}")  # Payment ID
-#     bill_text.append(f"KOT No: {order.id}")  # Order ID
-#     bill_text.append(f"Bill Date: {order.created_at.strftime('%d-%m-%Y')}")
-#     bill_text.append(f"Check In: {order.created_at.strftime('%H-%M-%S')}")
-#     bill_text.append("")
-#     bill_text.append("Item - UOM    Qty    Price    Value")
-#     bill_text.append("")
-
-#     for item_data in order.order_items.all():
-#         bill_text.append(f"{item_data.product.name} - Nos")
-#         bill_text.append(
-#             f"{item_data.quantity}    {item_data.product.price:.2f}    {item_data.quantity*item_data.product.price:.2f}"
-#         )
-
-#     # Get discount value (default to 0.00 if no discount is applied)
-#     total_payment_amount = Decimal(total_payment_amount)
-#     discount_value = order.discount.value if order.discount else Decimal("0.00")
-
-#     # Append the calculated totals
-#     bill_text.append("")
-#     bill_text.append(f"SubTotal:    {total_payment_amount - discount_value:.2f}")
-#     bill_text.append(f"Discount:    -{discount_value:.2f}")
-#     bill_text.append(f"VAT (5%):    {vat:.2f}")
-#     bill_text.append(f"Grand Total:   AED    {total_payment_amount:.2f}")
-#     bill_text.append("")
-#     bill_text.append("Thanks")
-#     bill_text.append("Visit again")
-
-#     # Join the bill text into a single string
-#     formatted_bill_text = "\n".join(bill_text)
-
-#     # Get the path to the logo file
-#     logo_path = os.path.join(settings.MEDIA_ROOT, "default_photos", "logo.jpg")
-
-#     # Define the PDF save path and public URL
-#     pdf_url = None
-#     if save_as_pdf:
-#         filename = f"invoice_{order.id}.pdf"
-#         pdf_path, pdf_url = save_bill_as_pdf(formatted_bill_text, filename, logo_path)
-
-#     return (
-#         formatted_bill_text,
-#         logo_path,
-#         pdf_url,
-#     )  # ✅ Return public URL instead of local path
+import random
+from django.utils.timezone import now
 
 
 def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
@@ -111,7 +51,7 @@ def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
     )
     bill_text.append(
         "{:<20} {:>20}".format(
-            f"KOT No: {order.id}", f"No Of Pax: {order.number_of_pax or 'N/A'}"
+            f"Order No: {order.id}", f"No Of Pax: {order.number_of_pax or 'N/A'}"
         )
     )
     bill_text.append(
@@ -135,7 +75,7 @@ def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
     # Order Items (unchanged)
     for item_data in order.order_items.all():
         product_name = item_data.product.name
-        quantity = item_data.quantity
+        quantity = item_data.remaining_quantity
         price = item_data.product.price
         total = quantity * price
 
@@ -160,7 +100,7 @@ def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
     discount_value = order.discount.value if order.discount else Decimal("0.00")
 
     bill_text.append("")
-    bill_text.append(f"SubTotal:       AED {total_payment_amount - discount_value:.2f}")
+    bill_text.append(f"SubTotal:       AED {order.final_total:.2f}")
     bill_text.append(f"Discount:       AED -{discount_value:.2f}")
     bill_text.append(f"VAT (5%):       AED {vat:.2f}")
     bill_text.append("=" * 45)
@@ -196,25 +136,307 @@ def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
     # Define the PDF save path and public URL
     pdf_url = None
     if save_as_pdf:
-        filename = f"invoice_{order.id}.pdf"
+        if payment:
+            filename = f"invoice_{payment}.pdf"
+        else:
+            random_number = random.randint(
+                100000, 999999
+            )  # Generate a 6-digit random number
+            filename = f"invoice_order_{order.id}_{random_number}.pdf"
         pdf_path, pdf_url = save_bill_as_pdf(formatted_bill_text, filename, logo_path)
 
     return (
         formatted_bill_text,
         logo_path,
         pdf_url,
-    )  # ✅ Return public URL instead of local path
+    )  #  Return public URL instead of local path
+
+
+def split_format_bill(
+    order, payment, selected_items, total_payment_amount, vat, save_as_pdf=False
+):
+    import textwrap
+    from apps.order.models import Payment
+
+    bill_text = []
+
+    # Header
+    bill_text.append("=" * 45)
+    bill_text.append("        TAX INVOICE        ")
+    bill_text.append("=" * 45)
+    bill_text.append("  Coffee Shop Co. L.L.C  ")
+    bill_text.append("     Shop 1, Block A     ")
+    bill_text.append("     Abraj Al Mamzar     ")
+    bill_text.append("       Dubai, UAE        ")
+    bill_text.append("Ct: 0547606099 / 0559803445")
+    bill_text.append("TRN: 104340270800001")
+    bill_text.append("=" * 45)
+    bill_text.append("      Split Bill      ")
+    bill_text.append("=" * 45)
+
+    # Invoice and Order Details
+    bill_text.append(
+        "{:<20} {:>20}".format(
+            f"Invoice No: {payment}", f"Table: {order.table.table_number or 'N/A'}"
+        )
+    )
+    bill_text.append(
+        "{:<20} {:>20}".format(
+            f"Order No: {order.id}", f"No Of Pax: {order.number_of_pax or 'N/A'}"
+        )
+    )
+    bill_text.append(
+        "{:<20} {:>20}".format(
+            f"Bill Date: {order.created_at.strftime('%d-%m-%Y')}",
+            f"Check Out: {order.check_out_time.strftime('%H:%M:%S') if order.check_out_time else 'N/A'}",
+        )
+    )
+    bill_text.append(f"Check In: {order.created_at.strftime('%H-%M-%S')}")
+    bill_text.append(
+        "{:<20} {:>20}".format(
+            f"Shift: {order.shift or 'N/A'}", f"Hall: {order.hall or 'N/A'}"
+        )
+    )
+    bill_text.append("=" * 45)
+
+    # Table Header
+    bill_text.append(
+        "{:<20} {:>6} {:>8} {:>10}".format("Item - UOM", "Qty", "Price", "Value")
+    )
+    bill_text.append("-" * 45)
+
+    # Order Items (only selected ones)
+    for item_data in selected_items:
+        product_name = item_data["product"].name
+        quantity = item_data["quantity"]
+        price = item_data["product"].price
+        total = quantity * price
+
+        # Wrap product name to fit within 20 characters
+        wrapped_product_name = textwrap.wrap(product_name, width=20)
+
+        # Print the first line of the product name with values
+        bill_text.append(
+            "{:<20} {:>6} {:<8.2f} {:<10.2f}".format(
+                wrapped_product_name[0], quantity, price, total
+            )
+        )
+
+        # Print any additional wrapped lines (without quantity, price, or total)
+        for line in wrapped_product_name[1:]:
+            bill_text.append("{:<20}".format(line))
+
+    bill_text.append("=" * 45)
+
+    # Totals based on selected items
+    bill_text.append("")
+    bill_text.append(f"SubTotal:       AED {total_payment_amount:.2f}")
+    bill_text.append(f"VAT (5%):       AED {vat:.2f}")
+    bill_text.append("=" * 45)
+    bill_text.append(f"Grand Total:    AED {total_payment_amount:.2f}")
+    bill_text.append("=" * 45)
+
+    # Payment details
+    try:
+        payment_instance = Payment.objects.get(id=payment)
+        bill_text.append("Collection Details:")
+        bill_text.append("")
+        bill_text.append(f"Payment Method: {payment_instance.payment_method}")
+        bill_text.append("=" * 45)
+    except Payment.DoesNotExist:
+        bill_text.append("Collection Details:")
+        bill_text.append("Payment details not found.")
+        bill_text.append("=" * 45)
+
+    # Closing Note
+    bill_text.append("")
+    bill_text.append("    Thanks for your visit!    ")
+    bill_text.append("        Visit Again!         ")
+    bill_text.append("=" * 45)
+
+    # Convert to formatted string
+    formatted_bill_text = "\n".join(bill_text)
+
+    # Get the path to the logo file
+    logo_path = os.path.join(settings.MEDIA_ROOT, "default_photos", "logo.jpg")
+
+    # Define the PDF save path and public URL
+    pdf_url = None
+    if save_as_pdf:
+        filename = f"invoice_{payment}.pdf"
+        pdf_path, pdf_url = save_bill_as_pdf(formatted_bill_text, filename, logo_path)
+
+    return formatted_bill_text, logo_path, pdf_url
+
+
+def group_format_bill(orders, payment, total_payment_amount, vat, save_as_pdf=False):
+    import textwrap
+    from apps.order.models import Payment, OrderItems
+    from django.utils.timezone import localtime
+
+    bill_text = []
+
+    # Header
+    bill_text.append("=" * 45)
+    bill_text.append("        TAX INVOICE        ")
+    bill_text.append("=" * 45)
+    bill_text.append("  Coffee Shop Co. L.L.C  ")
+    bill_text.append("     Shop 1, Block A     ")
+    bill_text.append("     Abraj Al Mamzar     ")
+    bill_text.append("       Dubai, UAE        ")
+    bill_text.append("Ct: 0547606099 / 0559803445")
+    bill_text.append("TRN: 104340270800001")
+    bill_text.append("=" * 45)
+    bill_text.append("         Group Bill         ")
+    bill_text.append("=" * 45)
+
+    # Extract Order Details
+    order_ids = [str(order.id) for order in orders]  # List of order IDs
+    table_numbers = [
+        str(order.table.table_number) if order.table else "N/A" for order in orders
+    ]  # Table numbers
+    total_pax = sum(order.number_of_pax or 0 for order in orders)  # Total pax
+    earliest_check_in = min(
+        order.created_at for order in orders
+    )  # Earliest check-in time
+    total_discount = sum(
+        order.discount.value if order.discount else Decimal("0.00") for order in orders
+    )  # Total discount
+
+    # Invoice and Payment Details
+    bill_text.append(
+        "{:<20} {:>20}".format(
+            f"Invoice No: {payment}",
+            f"Table: ({'-'.join(table_numbers)})",
+        )
+    )
+    bill_text.append(
+        "{:<20} {:>20}".format(
+            f"Order No: ({'-'.join(order_ids)})",
+            f"No Of Pax: {total_pax}",
+        )
+    )
+    bill_text.append(
+        "{:<20} {:>20}".format(
+            f"Bill Date: {localtime().strftime('%d-%m-%Y')}",
+            f"Check Out: {localtime().strftime('%H:%M:%S')}",
+        )
+    )
+    bill_text.append(f"Check In: {earliest_check_in.strftime('%H:%M:%S')}")
+
+    bill_text.append("=" * 45)
+
+    # Table Header
+    bill_text.append(
+        "{:<20} {:>6} {:>8} {:>10}".format("Item - UOM", "Qty", "Price", "Value")
+    )
+    bill_text.append("-" * 45)
+
+    # Track unique items and their totals
+    item_totals = {}
+
+    for order in orders:
+        order_items = OrderItems.objects.filter(order=order)
+
+        for item in order_items:
+            product_name = item.product.name
+            quantity = item.quantity
+            price = item.product.price
+            total = quantity * price
+
+            # Accumulate totals for the same items
+            if product_name in item_totals:
+                item_totals[product_name]["quantity"] += quantity
+                item_totals[product_name]["total"] += total
+            else:
+                item_totals[product_name] = {
+                    "quantity": quantity,
+                    "price": price,
+                    "total": total,
+                }
+
+    # Print all unique items
+    for product_name, data in item_totals.items():
+        wrapped_product_name = textwrap.wrap(product_name, width=20)
+
+        # Print the first line of the product name with values
+        bill_text.append(
+            "{:<20} {:>6} {:<8.2f} {:<10.2f}".format(
+                wrapped_product_name[0], data["quantity"], data["price"], data["total"]
+            )
+        )
+
+        # Print additional lines for long names
+        for line in wrapped_product_name[1:]:
+            bill_text.append("{:<20}".format(line))
+
+    bill_text.append("=" * 45)
+
+    # Totals
+    bill_text.append("")
+    bill_text.append(f"SubTotal:       AED {total_payment_amount:.2f}")
+    bill_text.append(f"VAT (5%):       AED {vat:.2f}")
+
+    bill_text.append(f"Discount:       AED -{total_discount:.2f}")
+
+    bill_text.append("=" * 45)
+
+    # Adjust the grand total after discount
+    grand_total = total_payment_amount - total_discount
+    bill_text.append(f"Grand Total:    AED {grand_total:.2f}")
+    bill_text.append("=" * 45)
+
+    # Payment Details
+    try:
+        payment_instance = Payment.objects.get(id=payment)
+        bill_text.append("Collection Details:")
+        bill_text.append("")
+        bill_text.append(f"Payment Method: {payment_instance.payment_method}")
+        bill_text.append("=" * 45)
+    except Payment.DoesNotExist:
+        bill_text.append("Collection Details:")
+        bill_text.append("Payment details not found.")
+        bill_text.append("=" * 45)
+
+    # Closing Note
+    bill_text.append("")
+    bill_text.append("    Thanks for your visit!    ")
+    bill_text.append("        Visit Again!         ")
+    bill_text.append("=" * 45)
+
+    # Convert to formatted string
+    formatted_bill_text = "\n".join(bill_text)
+
+    # Get the path to the logo file
+    logo_path = os.path.join(settings.MEDIA_ROOT, "default_photos", "logo.jpg")
+
+    # Define the PDF save path and public URL
+    pdf_url = None
+    if save_as_pdf:
+        filename = f"invoice_{payment}.pdf"
+        pdf_path, pdf_url = save_bill_as_pdf(formatted_bill_text, filename, logo_path)
+
+    return formatted_bill_text, logo_path, pdf_url
 
 
 def save_bill_as_pdf(bill_text, filename, logo_path=None):
-    """Save bill as a PDF file inside media/uploaded_photos/bills/."""
+    """Save bill as a PDF file inside media/uploads/bills/."""
 
     # Define the target directory inside the media folder
     bills_dir = os.path.join(settings.MEDIA_ROOT, "uploads", "bills")
-    os.makedirs(bills_dir, exist_ok=True)  # ✅ Ensure directory exists
+    os.makedirs(bills_dir, exist_ok=True)  #  Ensure directory exists
 
     # Generate the full PDF file path
     pdf_path = os.path.join(bills_dir, filename)
+
+    #  Check if the file already exists and delete it
+    if os.path.exists(pdf_path):
+        try:
+            os.remove(pdf_path)
+            print(f"Deleted existing bill: {pdf_path}")
+        except Exception as e:
+            print(f"Failed to delete existing bill: {e}")
+            raise PermissionError(_("Unable to delete existing bill file."))
 
     # Create PDF using ReportLab
     c = canvas.Canvas(pdf_path, pagesize=letter)
@@ -249,11 +471,11 @@ def save_bill_as_pdf(bill_text, filename, logo_path=None):
     c.save()
     print(f"Bill saved as PDF: {pdf_path}")
 
-    # ✅ Generate public URL for the saved PDF
+    # Generate public URL for the saved PDF
     pdf_relative_path = f"uploads/bills/{filename}"  # Relative path from MEDIA_URL
     pdf_url = urljoin(settings.MEDIA_URL, pdf_relative_path)
 
-    return pdf_path, pdf_url  # ✅ Return both file path and public URL
+    return pdf_path, pdf_url  # Return both file path and public URL
 
 
 def print_to_printer(printer_ip, bill_text, logo_path=None):
@@ -264,21 +486,23 @@ def print_to_printer(printer_ip, bill_text, logo_path=None):
         if logo_path and os.path.exists(logo_path):
             logo = Image.open(logo_path).convert("L")  # Convert to grayscale
             logo = logo.resize(
-                (512, int(logo.height * (512 / logo.width)))
-            )  # Scale width to 512px
+                (256, int(logo.height * (256 / logo.width)))  # Reduce width to 256px
+            )
+            printer.set(align="center")  # Center alignment
             printer.image(logo)
             printer.text("\n")  # Add a newline after the logo
 
         # Print bill text
+        printer.set(align="left")  # Reset alignment
         printer.text(bill_text + "\n")
 
         # Cut the paper
         printer.cut()
+        printer.cashdraw(2)  # Open cash drawer
 
         print(f"Print job sent to printer at {printer_ip}")
     except Exception as e:
         print(f"Failed to print to {printer_ip}: {e}")
-
 
 ########################################################
 def random_string_generator(size=10, chars=string.ascii_lowercase + string.digits):

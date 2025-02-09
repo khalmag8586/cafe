@@ -12,6 +12,7 @@ from apps.table.views import (
     TableChangeActiveView,
     TableDeleteView,
     TableCurrentOrderDialogView,
+    TableHallDialogView,
 )
 
 app_name = "table"
@@ -48,4 +49,5 @@ urlpatterns = [
         TableCurrentOrderDialogView.as_view(),
         name="table current order dialog",
     ),
+    path("hall_dialog/", TableHallDialogView.as_view(), name="table hall dialog"),
 ]

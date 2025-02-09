@@ -133,19 +133,21 @@ class ChildrenCategoriesView(generics.ListAPIView):
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "category.view_category"
     pagination_class = StandardResultsSetPagination
+    filter_backends = [OrderingFilter]  # Enable ordering via query params
+    ordering_fields = ["created_at", "name", "id"]  # Allow ordering on these fields
+    ordering = ["-created_at"]  # Default ordering (descending)
 
     def get_queryset(self):
         category_id = self.request.query_params.get("category_id")
         parent_category = Category.objects.filter(id=category_id).first()
 
         if parent_category:
-            return Category.objects.filter(parent=parent_category)
+            return Category.objects.filter(parent=parent_category).order_by('-created_at')
         else:
             return Category.objects.none()
 
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
-        # serializer = self.serializer_class(queryset, many=True)
         serializer = self.serializer_class(
             queryset, many=True, context={"request": request}
         )

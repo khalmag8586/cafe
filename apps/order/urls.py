@@ -4,10 +4,13 @@ from apps.order.views import (
     OrderCreateView,
     OrderAddMoreItems,
     OrderRemoveItems,
+    OrderItemNote,
     OrderPrintNewItems,
     # paying views
-    ApplyDiscountToOrderView,RemoveDiscountFromOrderView,
+    ApplyDiscountToOrderView,
+    RemoveDiscountFromOrderView,
     SplitBillView,
+    GenerateBillView,
     CheckoutOrderView,
     GroupBillsView,
     # order views
@@ -34,14 +37,20 @@ from apps.order.views import (
 urlpatterns = [
     path("create_order/", OrderCreateView.as_view(), name="create-order"),
     path("add_more_items/", OrderAddMoreItems.as_view(), name="add more items"),
+    path("add_note/", OrderItemNote.as_view(), name="add note to items"),
     path(
         "send_items_to_printers/", OrderPrintNewItems.as_view(), name="print new items"
     ),
     path("remove_items/", OrderRemoveItems.as_view(), name="remove items"),
     # order paying urls
     path("apply_discount/", ApplyDiscountToOrderView.as_view(), name="apply discount"),
-    path("remove_discount/", RemoveDiscountFromOrderView.as_view(), name="remove discount"),
+    path(
+        "remove_discount/",
+        RemoveDiscountFromOrderView.as_view(),
+        name="remove discount",
+    ),
     path("split_bill/", SplitBillView.as_view(), name="split bill"),
+    path('generate_bill/',GenerateBillView.as_view(),name='generate bill'),
     path("checkout_order/", CheckoutOrderView.as_view(), name="checkout order"),
     path("group_bills/", GroupBillsView.as_view(), name="group bills"),
     # order urls

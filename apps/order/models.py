@@ -99,6 +99,9 @@ class Order(models.Model):
             self.kot_number = (last_order.kot_number + 1) if last_order else 1
         # Update the associated table's fields
         if self.table:
+            # Ensure order hall matches table hall
+            self.hall = self.table.hall
+
             if self.is_paid:
                 # Scenario 2: Order is paid
                 # Reset table fields to their origin
@@ -109,7 +112,6 @@ class Order(models.Model):
                 # Update table fields based on the order
                 self.table.no_of_pax = self.number_of_pax
                 self.table.is_occupied = True
-
             # Save the table object
             self.table.save()
 
@@ -144,6 +146,7 @@ class OrderItems(models.Model):
     paid_by = models.IntegerField(
         null=True, blank=True
     )  # Track which pax paid for this item
+    notes = models.TextField(null=True, blank=True)
     sub_total = models.DecimalField(max_digits=10, decimal_places=2)
 
     def save(self, *args, **kwargs):
