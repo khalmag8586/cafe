@@ -2,6 +2,7 @@ from django.urls import path
 from apps.order.views import (
     # creating views
     OrderCreateView,
+    OrderChangeTableView,
     OrderAddMoreItems,
     OrderRemoveItems,
     OrderItemNote,
@@ -11,6 +12,7 @@ from apps.order.views import (
     RemoveDiscountFromOrderView,
     SplitBillView,
     GenerateBillView,
+    FetchInvoiceView,
     CheckoutOrderView,
     GroupBillsView,
     # order views
@@ -24,7 +26,9 @@ from apps.order.views import (
     # payment views
     PaymentListView,
     PaymentRetrieveView,
+    PaymentDeleteView,
     PaymentMethodDialogView,
+    # discount views
     DiscountCreateView,
     DiscountListView,
     DiscountInactiveListView,
@@ -32,10 +36,20 @@ from apps.order.views import (
     DiscountUpdateView,
     DiscountChangeStatusView,
     DiscountDeleteView,
+    # close day
+    BusinessDayCreateView,
+    CloseDayAPIView,
+    CloseDayListView,
+    CloseDayDeleteView,
+    # reports
+    ZReportView,
+    XReportView,
+    SalesReportView,
 )
 
 urlpatterns = [
     path("create_order/", OrderCreateView.as_view(), name="create-order"),
+    path("change_table/", OrderChangeTableView.as_view(), name="change-table"),
     path("add_more_items/", OrderAddMoreItems.as_view(), name="add more items"),
     path("add_note/", OrderItemNote.as_view(), name="add note to items"),
     path(
@@ -50,7 +64,8 @@ urlpatterns = [
         name="remove discount",
     ),
     path("split_bill/", SplitBillView.as_view(), name="split bill"),
-    path('generate_bill/',GenerateBillView.as_view(),name='generate bill'),
+    path("generate_bill/", GenerateBillView.as_view(), name="generate bill"),
+    path("fetch_invoice/", FetchInvoiceView.as_view(), name="fetch invoice"),
     path("checkout_order/", CheckoutOrderView.as_view(), name="checkout order"),
     path("group_bills/", GroupBillsView.as_view(), name="group bills"),
     # order urls
@@ -70,6 +85,7 @@ urlpatterns = [
     # payment urls
     path("payment_list/", PaymentListView.as_view(), name="payment-list"),
     path("payment_retrieve/", PaymentRetrieveView.as_view(), name="payment-retrieve"),
+    path("payment_delete/", PaymentDeleteView.as_view(), name="payment-delete"),
     path(
         "payment_method_dialog/",
         PaymentMethodDialogView.as_view(),
@@ -93,4 +109,15 @@ urlpatterns = [
         name="discount change status",
     ),
     path("discount_delete/", DiscountDeleteView.as_view(), name="discount-delete"),
+    path("close_day/", CloseDayAPIView.as_view(), name="close day"),
+    path("close_day_list/", CloseDayListView.as_view(), name="close day list"),
+    path("close_day_delete/", CloseDayDeleteView.as_view(), name="closeday delete"),
+    path("z_report/", ZReportView.as_view(), name="z report"),
+    path("x_report/", XReportView.as_view(), name="x report"),
+    path("sales_report/", SalesReportView.as_view(), name="sales report"),
+    path(
+        "businessday_create/",
+        BusinessDayCreateView.as_view(),
+        name="create business day",
+    ),
 ]

@@ -10,3 +10,5 @@ python-escpos
 psycopg2==2.9.9
 paypalrestsdk
 reportlab
+arabic-reshaper python-bidi
+django wfastcgi

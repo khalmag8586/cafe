@@ -5,9 +5,11 @@ from apps.order.models import (
     OrderItems,
     Payment,
     Discount,
+    BusinessDay,
 )
 
 from decimal import Decimal
+from datetime import datetime
 
 
 class OrderItemsSerializer(serializers.ModelSerializer):
@@ -33,6 +35,7 @@ class OrderItemsSerializer(serializers.ModelSerializer):
             "is_paid",
             "quantity_to_print",
             "is_printed",
+            "cancelled_quantity",
             "paid_by",
             "sub_total",
         ]
@@ -68,6 +71,7 @@ class OrderSerializer(serializers.ModelSerializer):
         model = Order
         fields = [
             "id",
+            "business_day",
             "table",
             "table_number",
             "number_of_pax",
@@ -203,8 +207,11 @@ class PaymentSerializer(serializers.ModelSerializer):
         model = Payment
         fields = [
             "id",
+            "business_day",
             "orders",
             "amount",
+            "cash_amount",
+            "visa_amount",
             "payment_method",
             "created_at",
             "created_by",
@@ -265,3 +272,11 @@ class DiscountActiveSerializer(serializers.ModelSerializer):
     class Meta:
         model = Discount
         fields = ["is_active"]
+
+
+class BusinessDaySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BusinessDay
+        fields = ["id", "start_time", "end_time", "is_closed", "closed_by"]
+
+

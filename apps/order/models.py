@@ -11,6 +11,25 @@ from apps.product.models import Product
 from apps.table.models import Table
 
 
+class BusinessDay(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    start_time = models.DateTimeField()
+    end_time = models.DateTimeField(null=True, blank=True)
+    is_closed =models.BooleanField(default=False)
+    closed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="day_closed_by_user",
+    )
+    # def close_day(self, user):
+    #     """Close the business day."""
+    #     self.end_time = now()
+    #     self.is_closed = True
+    #     self.closed_by = user
+    #     self.save()
+
+
 class Discount(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     value = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -58,6 +77,8 @@ class Order(models.Model):
     grand_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     is_paid = models.BooleanField(default=False)
     is_deleted = models.BooleanField(default=False)
+    business_day = models.ForeignKey(BusinessDay, on_delete=models.SET_NULL, null=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
@@ -85,8 +106,8 @@ class Order(models.Model):
             self.created_at = timezone.now()
         # Automatically set the shift based on check_in_time
         created_at = self.created_at.time()  # Extract time from datetime
-        morning_start = time(7, 0)  # 7:00 AM
-        morning_end = time(15, 0)  # 3:00 PM
+        morning_start = time(9, 0)  # 9:00 AM
+        morning_end = time(19, 0)  # 7:00 PM
 
         if morning_start <= created_at <= morning_end:
             self.shift = "morning"
@@ -143,6 +164,7 @@ class OrderItems(models.Model):
     is_paid = models.BooleanField(default=False)
     quantity_to_print = models.PositiveIntegerField(default=0)
     is_printed = models.BooleanField(default=False)
+    cancelled_quantity = models.PositiveIntegerField(default=0)  # Cancelled quantity
     paid_by = models.IntegerField(
         null=True, blank=True
     )  # Track which pax paid for this item
@@ -174,19 +196,32 @@ class OrderItems(models.Model):
 
 
 class Payment(models.Model):
-    PAYMENT_CHOICES = [("cash", "Cash"), ("card", "Visa Card")]
+    PAYMENT_CHOICES = [
+        ("cash", "Cash"),
+        ("card", "Visa Card"),
+        ("multi", "Multi"),
+    ]
     orders = models.ManyToManyField(
         "Order", related_name="payments"
     )  # Changed from ForeignKey to ManyToMany
 
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    cash_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    visa_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     payment_method = models.CharField(
         max_length=50, default="cash", choices=PAYMENT_CHOICES
     )  # e.g., 'cash', 'credit card', etc.
+    business_day = models.ForeignKey(BusinessDay, on_delete=models.SET_NULL, null=True)
+
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+
+        self.amount = self.cash_amount + self.visa_amount  # Ensure consistency
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Payment {self.id}"

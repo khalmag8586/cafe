@@ -39,12 +39,10 @@ class PermissionDialogView(generics.ListAPIView):
     permission_codename = "view_permission"
 
 
-
 class AssignPermissionsToGroupView(generics.CreateAPIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "add_permission"
-
 
     def create(self, request, *args, **kwargs):
         group_id = request.query_params.get("group_id")
@@ -71,7 +69,6 @@ class AssignPermissionsToUserView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "add_permission"
 
-
     def create(self, request, *args, **kwargs):
         user_id = request.query_params.get("user_id")
         permission_codenames = request.data.get("codename", [])
@@ -97,7 +94,6 @@ class RemovePermissionsFromGroupView(generics.UpdateAPIView):
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "change_group"
 
-
     def update(self, request, *args, **kwargs):
         group_id = request.query_params.get("group_id")
         permission_codenames = request.data.get("codename", [])
@@ -122,7 +118,6 @@ class RemovePermissionsFromUserView(generics.UpdateAPIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "change_permission"
-
 
     def update(self, request, *args, **kwargs):
         user_id = request.query_params.get("user_id")
@@ -155,23 +150,25 @@ class GroupListView(generics.ListAPIView):
 
     pagination_class = StandardResultsSetPagination
 
+
 class GroupRetrieveView(generics.RetrieveAPIView):
-    serializer_class=GroupSerializer
+    serializer_class = GroupSerializer
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "view_group"
     lookup_field = "id"
+
     def get_object(self):
         group_id = self.request.query_params.get("group_id")
         group = get_object_or_404(Group, id=group_id)
         return group
+
 
 class GroupCreateView(generics.CreateAPIView):
     serializer_class = GroupSerializer
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "add_group"
-
 
     def create(self, request, *args, **kwargs):
         group_serializer = self.get_serializer(data=request.data)
@@ -204,15 +201,27 @@ class GroupUpdateView(generics.UpdateAPIView):
         return group
 
     def update(self, request, *args, **kwargs):
+        group = self.get_object()
         partial = kwargs.pop("partial", False)
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
+
+        # Update group name if provided
+        if "name" in request.data:
+            serializer = self.get_serializer(group, data=request.data, partial=partial)
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+
+        # Update permissions if provided
+        permission_codenames = request.data.get("codename", [])
+        if permission_codenames:
+            permissions = Permission.objects.filter(codename__in=permission_codenames)
+            group.permissions.set(permissions)
 
         return Response(
-            {"detail": _("Group Updated successfully")}, status=status.HTTP_200_OK
+            {"detail": _("Group updated successfully.")},
+            status=status.HTTP_200_OK,
         )
+
+
 class GroupUpdatePermissionsView(generics.UpdateAPIView):
     serializer_class = GroupSerializer
     authentication_classes = [JWTAuthentication]
@@ -229,7 +238,7 @@ class GroupUpdatePermissionsView(generics.UpdateAPIView):
         group = self.get_object()
 
         # Get the permissions from the request body
-        permission_codenames = request.data.get("permissions", [])
+        permission_codenames = request.data.get("codename", [])
         if permission_codenames:
             permissions = Permission.objects.filter(codename__in=permission_codenames)
 
@@ -241,12 +250,12 @@ class GroupUpdatePermissionsView(generics.UpdateAPIView):
             status=status.HTTP_200_OK,
         )
 
+
 class GroupDeleteView(generics.DestroyAPIView):
     serializer_class = GroupSerializer
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "delete_group"
-
 
     def delete(self, request, *args, **kwargs):
 
@@ -276,15 +285,13 @@ class GroupDialogView(generics.ListAPIView):
     permission_codename = "view_group"
 
 
-
 class AssignUserToGroupView(generics.UpdateAPIView):
     serializer_class = UserSerializer  # Replace with your User serializer
     authentication_classes = [JWTAuthentication]  # Add your authentication classes
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "change_group"
 
-
-  # Add your permission classes
+    # Add your permission classes
 
     def update(self, request, *args, **kwargs):
         user_id = self.request.query_params.get("user_id")
@@ -316,7 +323,6 @@ class AssignManyUsersToGroupView(generics.UpdateAPIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "change_group"
-
 
     def update(self, request, *args, **kwargs):
         group_id = request.data.get("group_id")
@@ -355,7 +361,6 @@ class RemoveUserFromGroupView(generics.UpdateAPIView):
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "change_group"
 
-
     def update(self, request, *args, **kwargs):
         user_id = self.request.query_params.get("user_id")
         group_id = request.data.get("group_id")
@@ -385,7 +390,6 @@ class RemoveManyUsersFromGroupView(generics.UpdateAPIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated, HasPermissionOrInGroupWithPermission]
     permission_codename = "change_group"
-
 
     def update(self, request, *args, **kwargs):
         group_id = request.data.get("group_id")
