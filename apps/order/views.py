@@ -49,9 +49,11 @@ from cafe.util import (
     format_bill,
     split_format_bill,
     group_format_bill,
-    generate_report,
+    generate_report,#for x and z reports
+    generate_report_for_period,
     print_report,
     save_report_as_pdf,
+    save_report_period_as_pdf,
     generate_sales_report,
     save_sales_report_as_pdf,
     print_sales_report,
@@ -1725,6 +1727,153 @@ class XReportView(generics.GenericAPIView):
         )
 
 
+class XReportViewWithoutPrint(generics.GenericAPIView):
+    """
+    Generate X Report, save as PDF, print the report, and return file path.
+    """
+
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        day = request.query_params.get("day")
+        if not day:
+            return Response(
+                {"detail": _("Please provide a day in query params.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            parsed_day = parse_date(day)
+            if not parsed_day:
+                raise ValueError
+        except ValueError:
+            return Response(
+                {"detail": _("Invalid date format. Use YYYY-MM-DD.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        business_day = (
+            BusinessDay.objects.filter(
+                Q(start_time__date__lte=parsed_day)
+                & (
+                    Q(end_time__date__gte=parsed_day) | Q(end_time__isnull=True)
+                )  # Ensures the day is ongoing or ended after parsed_day
+            )
+            .order_by("-start_time")
+            .first()
+        )
+        if not business_day:
+            return Response(
+                {"detail": _("No business day found for this date.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Ensure orders are from this business day
+        orders = Order.objects.filter(business_day=business_day)
+
+        if not orders.exists():
+            return Response({"detail": _("No orders found for this business day.")})
+
+        # Generate the report
+        report_data = generate_report(business_day)
+
+        pdf_path = save_report_as_pdf(report_data, report_type="X", date=parsed_day)
+
+        return Response(
+            {
+                "detail": _("X Report generated without printing successfully."),
+                "pdf_path": request.build_absolute_uri(pdf_path),
+            }
+        )
+
+
+class XReportForPeriodView(generics.GenericAPIView):
+    """
+    Generate X Report for a period (from date to date), save as PDF, and return file path.
+    """
+
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        from_date = request.query_params.get("from_date")
+        to_date = request.query_params.get("to_date")
+
+        if not from_date or not to_date:
+            return Response(
+                {
+                    "detail": _(
+                        "Please provide both 'from_date' and 'to_date' in query params."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            parsed_from_date = parse_date(from_date)
+            parsed_to_date = parse_date(to_date)
+            if not parsed_from_date or not parsed_to_date:
+                raise ValueError
+            if parsed_from_date > parsed_to_date:
+                return Response(
+                    {"detail": _("'from_date' cannot be greater than 'to_date'.")},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        except ValueError:
+            return Response(
+                {"detail": _("Invalid date format. Use YYYY-MM-DD.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Fetch business days that fall within the given period
+        business_days = BusinessDay.objects.filter(
+            Q(start_time__date__lte=parsed_to_date)
+            & (Q(end_time__date__gte=parsed_from_date) | Q(end_time__isnull=True))
+        ).order_by("start_time")
+
+        if not business_days.exists():
+            return Response(
+                {"detail": _("No business days found for this period.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Fetch all orders within the business days
+        orders = Order.objects.filter(business_day__in=business_days)
+
+        if not orders.exists():
+            return Response({"detail": _("No orders found for this period.")})
+
+        # Generate the report
+        report_data = generate_report_for_period(business_days)
+
+        pdf_path = save_report_period_as_pdf(
+            report_data, report_type="X", date_range=(parsed_from_date, parsed_to_date)
+        )
+        # Print the report
+        print_result = print_report(report_data, report_type="X")
+
+        if isinstance(print_result, str) and print_result.startswith("Printing failed"):
+            return Response(
+                {
+                    "detail": _(
+                        "X Report generated successfully, but printing failed."
+                    ),
+                    "pdf_path": request.build_absolute_uri(pdf_path),
+                    "print_error": print_result,
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response(
+            {
+                "detail": _("X Report generated for the given period successfully."),
+                "pdf_path": request.build_absolute_uri(pdf_path),
+            }
+        )
+
+
+        
+
 class ZReportView(generics.GenericAPIView):
     """
     Close the current business day, generate the Z Report,
@@ -1747,19 +1896,6 @@ class ZReportView(generics.GenericAPIView):
                 last_business_day.is_closed = True
                 last_business_day.closed_by = request.user
                 last_business_day.save()
-
-        # else:
-        #     # No business day exists (first day of operation)
-        #     first_business_day = BusinessDay.objects.create(
-        #         start_time=current_time - timedelta(days=1)
-        #     )
-        #     return Response(
-        #         {
-        #             "detail": _("First business day started for yesterday."),
-        #             "business_day_id": str(first_business_day.id),
-        #         },
-        #         status=status.HTTP_201_CREATED,
-        #     )
 
         # **Prevent creating a new business day if one already exists for today**
         existing_business_day = BusinessDay.objects.filter(
@@ -1806,118 +1942,6 @@ class ZReportView(generics.GenericAPIView):
                 "new_business_day_id": str(new_business_day.id),
             }
         )
-
-
-# class SalesReportView(generics.GenericAPIView):
-#     """
-#     Generate Sales Report, save as PDF, print the report, and return file path.
-#     """
-
-#     authentication_classes = [JWTAuthentication]
-#     permission_classes = [IsAuthenticated]
-
-#     def get_business_day(day):
-#         try:
-#             return BusinessDay.objects.get(date=day)
-#         except BusinessDay.DoesNotExist:
-#             return None  # Or handle it differently
-
-#     def get(self, request, *args, **kwargs):
-
-#         day = request.query_params.get("day")
-#         if not day:
-#             return Response(
-#                 {"detail": _("Please provide a day in query params.")},
-#                 status=status.HTTP_400_BAD_REQUEST,
-#             )
-
-#         try:
-#             parsed_day = parse_date(day)
-#             if not parsed_day:
-#                 raise ValueError
-#         except ValueError:
-#             return Response(
-#                 {"detail": _("Invalid date format. Use YYYY-MM-DD.")},
-#                 status=status.HTTP_400_BAD_REQUEST,
-#             )
-
-#         # Find business day within the given date range
-#         business_day = self.get_business_day(day)
-#         if not business_day:
-#             return Response(
-#                 {"detail": _("No business day found for this date.")},
-#                 status=status.HTTP_400_BAD_REQUEST,
-#             )
-#         business_day = (
-#             BusinessDay.objects.filter(
-#                 Q(start_time__date__lte=parsed_day)
-#                 & (Q(end_time__date__gte=parsed_day) | Q(end_time__isnull=True))
-#             )
-#             .order_by("-start_time")
-#             .first()
-#         )
-
-#         # If a business day exists, use its start_time date; otherwise, use the raw parsed date
-#         report_date = business_day if business_day else parsed_day
-
-#         # Generate sales report data
-#         report_data = generate_sales_report(report_date)
-
-#         if "error" in report_data:
-#             return Response(report_data, status=400)
-
-#         # Save report as PDF
-#         reports_dir = os.path.join(settings.MEDIA_ROOT, "uploads/reports")
-#         os.makedirs(reports_dir, exist_ok=True)
-#         pdf_path = os.path.join(reports_dir, f"sales_report_{parsed_day}.pdf")
-#         # Remove existing file
-#         if os.path.exists(pdf_path):
-#             os.remove(pdf_path)
-#         save_sales_report_as_pdf(report_data, pdf_path)
-
-#         # Print the sales report
-#         print_result = print_sales_report(report_data)
-
-#         if isinstance(print_result, str) and print_result.startswith("Printing failed"):
-#             return Response(
-#                 {
-#                     "detail": _("Sales Report generated and printed successfully."),
-#                     "pdf_path": request.build_absolute_uri(
-#                         settings.MEDIA_URL
-#                         + f"uploads/reports/sales_report_{parsed_day}.pdf"
-#                     ),
-#                     "business_day": (
-#                         {
-#                             "id": str(business_day.id) if business_day else None,
-#                             "start_time": (
-#                                 business_day.start_time.isoformat()
-#                                 if business_day
-#                                 else None
-#                             ),
-#                             "end_time": (
-#                                 business_day.end_time.isoformat()
-#                                 if business_day and business_day.end_time
-#                                 else None
-#                             ),
-#                             "is_closed": (
-#                                 business_day.is_closed if business_day else None
-#                             ),
-#                         }
-#                         if business_day
-#                         else None
-#                     ),
-#                 }
-#             )
-
-#         return Response(
-#             {
-#                 "detail": _("Sales Report generated and printed successfully."),
-#                 "pdf_path": request.build_absolute_uri(
-#                     settings.MEDIA_URL
-#                     + f"uploads/reports/sales_report_{parsed_day}.pdf"
-#                 ),
-#             }
-#         )
 
 
 class SalesReportView(generics.GenericAPIView):

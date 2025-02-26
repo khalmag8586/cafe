@@ -12,9 +12,14 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework.views import APIView
 from django.contrib.auth.models import Group, Permission
 import os
+import tempfile
+import re
+import unicodedata
+
 from django.conf import settings
 from escpos.printer import Network
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
+
 from decimal import Decimal
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
@@ -27,12 +32,58 @@ from bidi.algorithm import get_display
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
 
+from escpos.printer import Dummy
+
 
 def format_arabic_text(text):
     """Reshape and reorder Arabic text for proper rendering."""
     reshaped_text = arabic_reshaper.reshape(text)
     bidi_text = get_display(reshaped_text)
     return bidi_text
+
+
+def is_arabic(text):
+    """Check if a string contains Arabic characters."""
+    return any(
+        "ARABIC" in unicodedata.name(char, "") for char in text if char.isalpha()
+    )
+
+
+def format_mixed_text(text):
+    """Reshape only Arabic words while keeping English words unchanged."""
+    words = re.split(r"(\s+|[:,.-])", text)  # Preserve spaces and punctuation
+    reshaped_words = [
+        format_arabic_text(word) if is_arabic(word) else word for word in words
+    ]
+    return "".join(reshaped_words)
+
+
+def create_bill_image(text, font_path, width=536, font_size=18):
+    """Generate an image from text for printing."""
+    font = ImageFont.truetype(font_path, font_size)
+
+    # Process lines for Arabic-English text
+    lines = text.split("\n")
+    formatted_lines = [format_mixed_text(line) for line in lines]
+
+    # Calculate image height dynamically
+    line_height = font_size + 5
+    height = max(100, len(formatted_lines) * line_height + 20)
+
+    # Create the image
+    img = Image.new("RGB", (width, height), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+
+    # Draw text onto image
+    y = 10
+    for line in formatted_lines:
+        draw.text((10, y), line, fill=(0, 0, 0), font=font)
+        y += line_height
+
+    # Save to a temporary file
+    temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    img.save(temp_img.name)
+    return temp_img.name
 
 
 def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
@@ -96,7 +147,9 @@ def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
 
         # Wrap product name to fit within 20 characters (adjustable)
         wrapped_product_name = textwrap.wrap(product_name, width=20)
-        wrapped_product_name_ar = textwrap.wrap(product_name_ar, width=20)
+        wrapped_product_name_ar = textwrap.wrap(
+            product_name_ar, width=20
+        )  # Format Arabic text
 
         # Print the first line of the product name with the values
         bill_text.append(
@@ -513,30 +566,65 @@ def save_bill_as_pdf(bill_text, filename, logo_path=None):
 
 
 def print_to_printer(printer_ip, bill_text, logo_path=None):
+    """Send text to the thermal printer as an image."""
     try:
+        # printer = Dummy()  # Use Network(printer_ip) for actual printing
         printer = Network(printer_ip)
-
-        # Print logo if provided
+        # ✅ Print logo if provided
         if logo_path and os.path.exists(logo_path):
-            logo = Image.open(logo_path).convert("L")  # Convert to grayscale
-            logo = logo.resize(
-                (256, int(logo.height * (256 / logo.width)))  # Reduce width to 256px
-            )
-            printer.set(align="center")  # Center alignment
+            logo = Image.open(logo_path).convert("L")
+            logo = logo.resize((256, int(logo.height * (256 / logo.width))))
+            printer.set(align="center")
             printer.image(logo)
-            printer.text("\n")  # Add a newline after the logo
+            printer.text("\n")
 
-        # Print bill text
-        printer.set(align="left")  # Reset alignment
-        printer.text(bill_text + "\n")
+        # ✅ Generate the bill image
+        font_path = os.path.join(
+            settings.BASE_DIR, "fonts", "NotoSansArabic-VariableFont_wdth,wght.ttf"
+        )
+        bill_image_path = create_bill_image(bill_text, font_path)
 
-        # Cut the paper
+        # ✅ Print the image
+        printer.image(bill_image_path)
+
+        # ✅ Cut the paper
         printer.cut()
-        printer.cashdraw(2)  # Open cash drawer
+        printer.cashdraw(2)
 
         print(f"Print job sent to printer at {printer_ip}")
+
+        # ✅ Cleanup temporary file
+        os.remove(bill_image_path)
+
     except Exception as e:
         print(f"Failed to print to {printer_ip}: {e}")
+
+
+# def print_to_printer(printer_ip, bill_text, logo_path=None):
+#     try:
+#         printer = Network(printer_ip)
+
+#         # Print logo if provided
+#         if logo_path and os.path.exists(logo_path):
+#             logo = Image.open(logo_path).convert("L")  # Convert to grayscale
+#             logo = logo.resize(
+#                 (256, int(logo.height * (256 / logo.width)))  # Reduce width to 256px
+#             )
+#             printer.set(align="center")  # Center alignment
+#             printer.image(logo)
+#             printer.text("\n")  # Add a newline after the logo
+
+#         # Print bill text
+#         printer.set(align="left")  # Reset alignment
+#         printer.text(bill_text + "\n")
+
+#         # Cut the paper
+#         printer.cut()
+#         printer.cashdraw(2)  # Open cash drawer
+
+#         print(f"Print job sent to printer at {printer_ip}")
+#     except Exception as e:
+#         print(f"Failed to print to {printer_ip}: {e}")
 
 
 def generate_report(source):
@@ -693,6 +781,166 @@ def generate_report(source):
 
     return {
         "business_day": business_day,
+        "total_sales": total_sales,
+        "total_discounts": total_discounts,
+        "net_total": net_total,
+        "cash_total": cash_total,
+        "card_total": card_total,
+        "total_collection": total_collection,
+        "collection_details": collection_details,
+        "revenue_by_hall": revenue_by_hall,
+        "sales_by_hall": sales_by_hall,
+        "shift_pax_details": shift_pax_details,
+        "shift_avg_per_pax": shift_avg_per_pax,
+        "vat_collected": vat_collected,
+        "sub_group_sales": sub_group_sales,
+        "group_sales": group_sales,
+        "discount_orders": discount_orders,
+        "canceled_items": canceled_items,
+    }
+
+
+def generate_report_for_period(business_days):
+    """
+    Generate a detailed report based on a period (multiple business days).
+    """
+    from django.db.models import Sum
+    from decimal import Decimal
+    from apps.order.models import Order, Payment, OrderItems
+    from apps.category.models import Category
+
+    if not business_days:
+        return {"detail": "No business days found for this period."}
+
+    orders = Order.objects.filter(
+        business_day__in=business_days, is_deleted=False, is_paid=True
+    )
+    payments = Payment.objects.filter(business_day__in=business_days)
+
+    # Totals
+    total_sales = sum(order.final_total for order in orders)
+    total_discounts = sum(order.discount.value for order in orders if order.discount)
+    net_total = sum(order.grand_total for order in orders)
+
+    # Collection Details
+    cash_total = sum(payment.cash_amount for payment in payments)
+    card_total = sum(payment.visa_amount for payment in payments)
+    total_collection = sum(payment.amount for payment in payments)
+
+    collection_details = {
+        "cash_total": cash_total,
+        "card_total": card_total,
+        "total_collection": total_collection,
+    }
+
+    # Revenue Center Wise Collection (Cash & Card per Hall)
+    halls_data = orders.values("hall").annotate(
+        hall_sales=Sum("final_total"), guest_count=Sum("number_of_pax")
+    )
+    halls = [entry["hall"] for entry in halls_data]
+    revenue_by_hall = {hall: {"cash": 0, "card": 0, "total": 0} for hall in halls}
+
+    for payment in payments:
+        for order in payment.orders.all():  # ManyToManyField
+            hall_name = order.hall if order.hall else "Unknown"
+            if payment.payment_method in ["cash", "multi"]:
+                revenue_by_hall[hall_name]["cash"] += payment.cash_amount
+            if payment.payment_method in ["card", "multi"]:
+                revenue_by_hall[hall_name]["card"] += payment.visa_amount
+            revenue_by_hall[hall_name]["total"] += payment.amount
+
+    # Revenue Center Wise Sales
+    sales_by_hall = {hall: 0 for hall in halls}
+    for order in orders:
+        sales_by_hall[order.hall] += order.final_total
+
+    # Canceled Items Data
+    canceled_items = {}
+
+    for order in orders:
+        for item in order.order_items.filter(cancelled_quantity__gt=0):
+            product_name = item.product.name
+            if product_name not in canceled_items:
+                canceled_items[product_name] = {"quantity": 0, "total_loss": Decimal(0)}
+            canceled_items[product_name]["quantity"] += item.cancelled_quantity
+            canceled_items[product_name]["total_loss"] += (
+                item.product.price * item.cancelled_quantity
+            )
+
+    # Shift Wise Guest Count & Sales
+    shifts = ["morning", "evening"]
+    shift_pax_details = {
+        shift: {hall: {"guests": 0, "sales": 0} for hall in halls} for shift in shifts
+    }
+
+    for order in orders:
+        shift_pax_details[order.shift][order.hall]["guests"] += order.number_of_pax
+        shift_pax_details[order.shift][order.hall]["sales"] += order.final_total
+
+    # Shift Wise Average Per Pax
+    shift_avg_per_pax = {
+        shift: {
+            hall: {
+                "guests": shift_pax_details[shift][hall]["guests"],
+                "avg_per_guest": (
+                    shift_pax_details[shift][hall]["sales"]
+                    / shift_pax_details[shift][hall]["guests"]
+                    if shift_pax_details[shift][hall]["guests"] > 0
+                    else 0
+                ),
+            }
+            for hall in halls
+        }
+        for shift in shifts
+    }
+
+    # Tax Details
+    vat_collected = sum(order.vat for order in orders)
+
+    # Sub Group Wise Sales
+    sub_categories = Category.objects.filter(parent__isnull=False)  # Only subcategories
+    sub_group_sales = {sub.name: 0 for sub in sub_categories}
+
+    for order in orders:
+        for item in order.order_items.all():
+            for category in item.product.category.filter(
+                parent__isnull=False
+            ):  # Only subcategories
+                sub_group_sales[category.name] += (
+                    item.product.price * item.quantity
+                ) / Decimal(
+                    1.05
+                )  # Price before VAT
+
+    # Group Wise Sales
+    categories = Category.objects.filter(parent__isnull=True)
+    category_map = {
+        sub.name: sub.parent.name for sub in sub_categories
+    }  # Parent category mapping
+    group_sales = {cat.name: 0 for cat in categories}
+
+    for order in orders:
+        for item in order.order_items.all():
+            for category in item.product.category.all():
+                parent_name = category_map.get(
+                    category.name, category.name
+                )  # Get parent or use itself
+                group_sales[parent_name] += (
+                    item.product.price * item.quantity
+                ) / Decimal(1.05)
+
+    # Discount Details
+    discount_orders = [
+        {
+            "order_id": order.id,
+            "discount_amount": order.discount.value,
+            "final_total": order.final_total,
+        }
+        for order in orders
+        if order.discount
+    ]
+
+    return {
         "total_sales": total_sales,
         "total_discounts": total_discounts,
         "net_total": net_total,
@@ -1038,6 +1286,202 @@ def save_report_as_pdf(report_data, report_type, date):
         c.drawString(10, y, "NO CANCELED ITEMS")
         y -= 15
     draw_line()
+    # ✅ **End of Report**
+    draw_centered("END OF REPORT")
+    draw_line()
+
+    # ✅ **Save and Return PDF URL**
+    c.save()
+    pdf_url = f"{settings.MEDIA_URL}uploads/reports/{pdf_filename}"
+
+    return pdf_url
+
+
+def save_report_period_as_pdf(report_data, report_type, date_range):
+    """
+    Generates a PDF report formatted for an 80mm thermal printer with dynamic page handling.
+    Supports a date range instead of a single date.
+    """
+    receipt_width = 220  # 80mm printer width
+    pdf_height = 2000  # Increased height for long reports
+    font_size = 10
+
+    reports_dir = os.path.join(settings.MEDIA_ROOT, "uploads/reports")
+    os.makedirs(reports_dir, exist_ok=True)
+
+    start_date, end_date = date_range
+    pdf_filename = f"{report_type}_Report_{start_date}_to_{end_date}.pdf"
+    pdf_path = os.path.join(reports_dir, pdf_filename)
+
+    # Remove existing file
+    if os.path.exists(pdf_path):
+        os.remove(pdf_path)
+
+    # Create PDF canvas
+    c = canvas.Canvas(pdf_path, pagesize=(receipt_width, pdf_height))
+    c.setFont("Courier-Bold", font_size)
+
+    y = pdf_height - 20  # Initial Y position
+
+    def check_page_break():
+        """Creates a new page if y position is too low."""
+        nonlocal y
+        if y < 50:
+            c.showPage()  # Create new page
+            c.setFont("Courier-Bold", font_size)
+            y = pdf_height - 20
+
+    def draw_centered(text):
+        """Draws centered text with page break handling."""
+        nonlocal y
+        check_page_break()
+        c.drawCentredString(receipt_width / 2, y, text)
+        y -= 15
+
+    def draw_line():
+        """Draws a horizontal line with page break handling."""
+        nonlocal y
+        check_page_break()
+        c.line(10, y, receipt_width - 10, y)
+        y -= 10
+
+    # ✅ **Report Header**
+    draw_centered("IBN EZZ COFFEE SHOP CO. L.L.C")
+    draw_centered(f"{report_type} REPORT")
+    draw_centered(f"FROM: {start_date} TO {end_date}")
+    draw_centered(f"PRINTED ON: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    draw_line()
+
+    # ✅ **Sales Summary**
+    c.drawString(10, y, f"Total Sales: {report_data['total_sales']:.2f}")
+    y -= 15
+    c.drawString(10, y, f"Total Discounts: {report_data['total_discounts']:.2f}")
+    y -= 15
+    c.drawString(10, y, f"Net Total: {report_data['net_total']:.2f}")
+    y -= 20
+    draw_line()
+
+    # ✅ **Collection Details**
+    draw_centered("COLLECTION DETAILS")
+    collection = report_data["collection_details"]
+
+    c.drawString(10, y, "CARD:")
+    c.drawRightString(receipt_width - 10, y, f"{collection['card_total']:.2f}")
+    y -= 15
+
+    c.drawString(10, y, "CASH:")
+    c.drawRightString(receipt_width - 10, y, f"{collection['cash_total']:.2f}")
+    y -= 15
+
+    draw_line()
+
+    c.drawString(10, y, "TOTAL COLLECTION:")
+    c.drawRightString(receipt_width - 10, y, f"{collection['total_collection']:.2f}")
+    y -= 20
+    draw_line()
+
+    # ✅ **Tax Details**
+    draw_centered("TAX DETAILS")
+    c.drawString(10, y, f"VAT: {report_data['vat_collected']:.2f}")
+    y -= 15
+    draw_line()
+
+    # ✅ **Revenue Center Wise Collection**
+    draw_centered("REVENUE CENTER WISE COLLECTION")
+    for hall, revenue in report_data["revenue_by_hall"].items():
+        check_page_break()
+        c.drawString(10, y, hall.upper())
+        y -= 15
+        c.drawString(20, y, f"CASH: {revenue['cash']:.2f}")
+        y -= 15
+        c.drawString(20, y, f"CARD: {revenue['card']:.2f}")
+        y -= 15
+        c.drawString(20, y, f"TOTAL: {revenue['total']:.2f}")
+        y -= 20
+        draw_line()
+
+    # ✅ **Shift Wise Hall Pax Details**
+    draw_centered("SHIFT WISE HALL PAX DETAILS")
+    c.drawString(10, y, f"{'REVENUE CENTER':<15}{'GUESTS':>8}{'SALES':>10}")
+    y -= 15
+
+    for shift, halls in report_data["shift_pax_details"].items():
+        check_page_break()
+        c.drawString(10, y, shift.upper())
+        y -= 15
+        for hall, details in halls.items():
+            c.drawString(
+                10,
+                y,
+                f"{hall.upper():<15}{details['guests']:>8}{details['sales']:>10.2f}",
+            )
+            y -= 15
+        draw_line()
+
+    # ✅ **Shift Wise Avg Per Pax**
+    draw_centered("SHIFT WISE AVG PER PAX")
+    c.drawString(10, y, f"{'REVENUE CENTER':<15}{'GUESTS':>8}{'AVG/GUEST':>10}")
+    y -= 15
+
+    for shift, halls in report_data["shift_avg_per_pax"].items():
+        check_page_break()
+        c.drawString(10, y, shift.upper())
+        y -= 15
+        for hall, details in halls.items():
+            c.drawString(
+                10,
+                y,
+                f"{hall.upper():<15}{details['guests']:>8}{details['avg_per_guest']:>10.2f}",
+            )
+            y -= 15
+        draw_line()
+
+    # ✅ **Group-wise Sales**
+    draw_centered("GROUP-WISE SALES")
+    for category, sales in report_data["group_sales"].items():
+        check_page_break()
+        c.drawString(10, y, f"{category.capitalize()}: {sales:.2f}")
+        y -= 15
+    draw_line()
+
+    # ✅ **Sub Group-wise Sales**
+    draw_centered("SUB GROUP-WISE SALES")
+    for sub_category, sales in report_data["sub_group_sales"].items():
+        check_page_break()
+        c.drawString(10, y, f"{sub_category.capitalize()}: {sales:.2f}")
+        y -= 15
+    draw_line()
+
+    # ✅ **Discounted Orders**
+    draw_centered("DISCOUNTED ORDERS")
+    if report_data["discount_orders"]:
+        for discount in report_data["discount_orders"]:
+            check_page_break()
+            c.drawString(
+                10,
+                y,
+                f"Order #{discount['order_id']} - Discount: {discount['discount_amount']:.2f}",
+            )
+            y -= 15
+    else:
+        c.drawString(10, y, "NO DISCOUNTS APPLIED.")
+        y -= 15
+    draw_line()
+
+    # ✅ **Canceled Items**
+    draw_centered("CANCELED ITEMS")
+    if report_data["canceled_items"]:
+        for product, details in report_data["canceled_items"].items():
+            check_page_break()
+            c.drawString(
+                10, y, f"{product}: {details['quantity']} x {details['total_loss']:.2f}"
+            )
+            y -= 15
+    else:
+        c.drawString(10, y, "NO CANCELED ITEMS")
+        y -= 15
+    draw_line()
+
     # ✅ **End of Report**
     draw_centered("END OF REPORT")
     draw_line()

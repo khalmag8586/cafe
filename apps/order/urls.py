@@ -44,6 +44,8 @@ from apps.order.views import (
     # reports
     ZReportView,
     XReportView,
+    XReportViewWithoutPrint,
+    XReportForPeriodView,
     SalesReportView,
 )
 
@@ -114,6 +116,8 @@ urlpatterns = [
     path("close_day_delete/", CloseDayDeleteView.as_view(), name="closeday delete"),
     path("z_report/", ZReportView.as_view(), name="z report"),
     path("x_report/", XReportView.as_view(), name="x report"),
+    path("x_report_no_print/", XReportViewWithoutPrint.as_view(), name="x report without print"),
+    path("x_report_period/", XReportForPeriodView.as_view(), name="x report period"),
     path("sales_report/", SalesReportView.as_view(), name="sales report"),
     path(
         "businessday_create/",
