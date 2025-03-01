@@ -49,8 +49,9 @@ from cafe.util import (
     format_bill,
     split_format_bill,
     group_format_bill,
-    generate_report,#for x and z reports
+    generate_report,  # for x and z reports
     generate_report_for_period,
+    print_period_report,
     print_report,
     save_report_as_pdf,
     save_report_period_as_pdf,
@@ -303,6 +304,7 @@ class OrderPrintNewItems(generics.GenericAPIView):
                 )
                 barista_text.append(f"{item.product.name_ar}")
                 barista_text.append(f"Notes: {item.notes}")
+                barista_text.append("---------")
             print_to_printer(barista_printer.ip_address, "\n".join(barista_text))
 
         # Print for shisha
@@ -1850,7 +1852,7 @@ class XReportForPeriodView(generics.GenericAPIView):
             report_data, report_type="X", date_range=(parsed_from_date, parsed_to_date)
         )
         # Print the report
-        print_result = print_report(report_data, report_type="X")
+        print_result = print_period_report(report_data, report_type="X",start_date=from_date,end_date=to_date)
 
         if isinstance(print_result, str) and print_result.startswith("Printing failed"):
             return Response(
@@ -1871,8 +1873,6 @@ class XReportForPeriodView(generics.GenericAPIView):
             }
         )
 
-
-        
 
 class ZReportView(generics.GenericAPIView):
     """
