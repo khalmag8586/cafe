@@ -13,6 +13,9 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework.views import APIView
 from django.contrib.auth.models import Group, Permission
 import os
+import time
+import io
+
 import tempfile
 import re
 import unicodedata
@@ -44,38 +47,84 @@ def format_arabic_text(text):
 
 def is_arabic_text(text):
     """Check if the text starts and ends with Arabic characters."""
-    arabic_pattern = re.compile(r"^[\u0600-\u06FF\s]+$")  # Matches only Arabic letters and spaces
+    arabic_pattern = re.compile(
+        r"^[\u0600-\u06FF\s]+$"
+    )  # Matches only Arabic letters and spaces
     return bool(arabic_pattern.match(text.strip()))
 
-def create_bill_image(text, font_path, width=536, font_size=18):
-    """Generate an image from text for printing."""
+
+# def create_bill_image(text, font_path, width=536, font_size=18):
+#     """Generate an image from text for printing."""
+#     font = ImageFont.truetype(font_path, font_size)
+
+#     # Process lines for Arabic-English text
+#     lines = text.split("\n")
+#     formatted_lines = [
+#         format_arabic_text(line) if is_arabic_text(line) else line
+#         for line in lines
+#     ]
+
+#     # Calculate image height dynamically
+#     line_height = font_size + 5
+#     height = max(100, len(formatted_lines) * line_height + 20)
+
+#     # Create the image
+#     img = Image.new("RGB", (width, height), color=(255, 255, 255))
+#     draw = ImageDraw.Draw(img)
+
+#     # Draw text onto image
+#     y = 10
+#     for line in formatted_lines:
+#         draw.text((10, y), line, fill=(0, 0, 0), font=font)
+#         y += line_height
+
+#     # Save to a temporary file
+#     temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+#     img.save(temp_img.name)
+#     return temp_img.name
+
+
+def arabic_text_to_image(text, font_path, font_size=18):
+    """Convert Arabic text to an in-memory image for better printing"""
     font = ImageFont.truetype(font_path, font_size)
 
-    # Process lines for Arabic-English text
-    lines = text.split("\n")
-    formatted_lines = [
-        format_arabic_text(line) if is_arabic_text(line) else line
-        for line in lines
-    ]
+    img_width = 576  # ✅ 80mm paper width
+    img_height = font_size + 10  # Adjust height dynamically
 
-    # Calculate image height dynamically
-    line_height = font_size + 5
-    height = max(100, len(formatted_lines) * line_height + 20)
-
-    # Create the image
-    img = Image.new("RGB", (width, height), color=(255, 255, 255))
+    img = Image.new("RGB", (img_width, img_height), "white")
     draw = ImageDraw.Draw(img)
+    draw.text((10, 5), text, font=font, fill="black")
 
-    # Draw text onto image
-    y = 10
-    for line in formatted_lines:
-        draw.text((10, y), line, fill=(0, 0, 0), font=font)
-        y += line_height
+    # ✅ Convert image to in-memory bytes (no file storage)
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format="PNG")
+    img_bytes.seek(0)
 
-    # Save to a temporary file
-    temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    img.save(temp_img.name)
-    return temp_img.name
+    return img_bytes
+
+
+# def arabic_text_to_image(text, font_path, font_size=18):
+#     """Convert Arabic text to an in-memory image for better printing"""
+#     font = ImageFont.truetype(font_path, font_size)
+
+#     img_width = 576  # ✅ 80mm paper width
+
+#     # 🔹 Measure text size and adjust height dynamically
+#     dummy_img = Image.new("RGB", (1, 1))
+#     dummy_draw = ImageDraw.Draw(dummy_img)
+#     text_width, text_height = dummy_draw.textsize(text, font=font)
+#     img_height = text_height + 20  # Extra padding for better visibility
+
+#     img = Image.new("RGB", (img_width, img_height), "white")
+#     draw = ImageDraw.Draw(img)
+#     draw.text((10, 10), text, font=font, fill="black")  # Increased y-padding
+
+#     # ✅ Convert image to in-memory bytes (no file storage)
+#     img_bytes = io.BytesIO()
+#     img.save(img_bytes, format="PNG")
+#     img_bytes.seek(0)
+
+#     return img_bytes
 
 
 def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
@@ -87,49 +136,56 @@ def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
     # Header (Centered Text)
     bill_text.append("=" * width)
     # bill_text.append("Thanks for your visit!".rjust(width//2 + len("Thanks for your visit!")//2))
-    bill_text.append("TAX INVOICE".rjust(width // 2 + len("TAX INVOICE") // 2))
+    # bill_text.append("TAX INVOICE".rjust(width // 2 + len("TAX INVOICE") // 2))
+    bill_text.append("TAX INVOICE".center(width))
     bill_text.append("=" * width)
-    bill_text.append(
-        "Coffee Shop Co. L.L.C".rjust(width // 2 + len("Coffee Shop Co. L.L.C") // 2)
-    )
-    bill_text.append("Shop 1, Block A".rjust(width // 2 + len("Shop 1, Block A") // 2))
-    bill_text.append("Abraj Al Mamzar".rjust(width // 2 + len("Abraj Al Mamzar") // 2))
-    bill_text.append("Dubai, UAE".rjust(width // 2 + len("Dubai, UAE") // 2))
-    bill_text.append(
-        "Ct: 0547606099 / 0559803445".rjust(
-            width // 2 + len("Ct: 0547606099 / 0559803445") // 2
-        )
-    )
-    bill_text.append(
-        "TRN: 104340270800001".rjust(width // 2 + len("TRN: 104340270800001") // 2)
-    )
+    # bill_text.append("Coffee Shop Co. L.L.C".rjust(width // 2 + len("Coffee Shop Co. L.L.C") // 2))
+    bill_text.append("Coffee Shop Co. L.L.C".center(width))
+    # bill_text.append("Shop 1, Block A".rjust(width // 2 + len("Shop 1, Block A") // 2))
+    bill_text.append("Shop 1, Block A".center(width))
+    # bill_text.append("Abraj Al Mamzar".rjust(width // 2 + len("Abraj Al Mamzar") // 2))
+    bill_text.append("Abraj Al Mamzar".center(width))
+    # bill_text.append("Dubai, UAE".rjust(width // 2 + len("Dubai, UAE") // 2))
+    bill_text.append("Dubai, UAE".center(width))
+    # bill_text.append("Ct: 0547606099 / 0559803445".rjust(width // 2 + len("Ct: 0547606099 / 0559803445") // 2))
+    bill_text.append("Ct: 0547606099 / 0559803445".center(width))
+    # bill_text.append("TRN: 104340270800001".rjust(width // 2 + len("TRN: 104340270800001") // 2))
+    bill_text.append("TRN: 104340270800001".center(width))
     bill_text.append("=" * width)
-    bill_text.append("Checkout Bill".rjust(width // 2 + len("Checkout Bill") // 2))
+    # bill_text.append("Checkout Bill".rjust(width // 2 + len("Checkout Bill") // 2))
+    bill_text.append("Checkout Bill".center(width))
     bill_text.append("=" * width)
 
     # Invoice and Order Details (Aligned)
     bill_text.append(
-        "{:<20} {:>20}".format(
+        "{:<25} {:<25}".format(
             f"Invoice No: {payment}", f"Table: {order.table.table_number or 'N/A'}"
         )
     )
 
     bill_text.append(
-        "{:<20} {:>20}".format(
+        "{:<25} {:<25}".format(
             f"Order No: {order.id}", f"No Of Pax: {order.number_of_pax or 'N/A'}"
         )
     )
 
-    bill_text.append(f"Bill Date: {order.created_at.strftime('%d-%m-%Y')}")
-    bill_text.append(f"Check In:  {order.created_at.strftime('%H:%M:%S')}")
-    if order.check_out_time:
-        bill_text.append(
-            f"Check Out: {order.check_out_time.strftime('%H:%M:%S')}"
-        )  # On a new line
-    else:
-        bill_text.append(f"Check Out: N/A")
     bill_text.append(
-        "{:<20} {:>20}".format(
+        "{:<25} {:<25}".format(
+            f"Bill Date: {order.created_at.strftime('%d-%m-%Y')}", ""
+        )
+    )
+    bill_text.append(
+        "{:<25} {:<25}".format(f"Check In: {order.created_at.strftime('%H:%M:%S')}", "")
+    )
+    bill_text.append(
+        "{:<25} {:<25}".format(
+            f"Check Out: {order.check_out_time.strftime('%H:%M:%S') if order.check_out_time else 'N/A'}",
+            "",
+        )
+    )
+
+    bill_text.append(
+        "{:<25} {:<25}".format(
             f"Shift: {order.shift or 'N/A'}", f"Hall: {order.hall or 'N/A'}"
         )
     )
@@ -183,33 +239,33 @@ def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
 
     # Totals (Aligned)
     bill_text.append("")
-    bill_text.append(f"SubTotal:       AED {order.final_total:>7.2f}")
+    bill_text.append(f"{'SubTotal:':<25} AED {order.final_total:7.2f}")
     bill_text.append(
-        f"Discount:       AED -{order.discount.value if order.discount else 0.00:>7.2f}"
+        f"{'Discount:':<25} AED -{order.discount.value if order.discount else 0.00:6.2f}"
     )
-    bill_text.append(f"VAT (5%):       AED {vat:>7.2f}")
+    bill_text.append(f"{'VAT (5%):':<25} AED {vat:7.2f}")
     bill_text.append("=" * width)
-    bill_text.append(f"Grand Total:    AED {total_payment_amount:>7.2f}")
+    bill_text.append(f"{'Grand Total:':<25} AED {total_payment_amount:7.2f}")
     bill_text.append("=" * width)
 
     # Collection Details
     try:
         payment_instance = Payment.objects.get(id=payment)
-        bill_text.append("Collection Details:")
+        bill_text.append("Collection Details:".center(width))
         bill_text.append("")
         bill_text.append(f"Payment Method: {payment_instance.payment_method}")
         bill_text.append("=" * width)
     except Payment.DoesNotExist:
-        bill_text.append("Collection Details:")
+        bill_text.append("Collection Details:".center(width))
         bill_text.append("Payment details not found.")
         bill_text.append("=" * width)
 
     # Closing Note
     bill_text.append("")
-    bill_text.append(
-        "Thanks for your visit!".rjust(width // 2 + len("Thanks for your visit!") // 2)
-    )
-    bill_text.append("Visit Again!".rjust(width // 2 + len("Visit Again!") // 2))
+    # bill_text.append("Thanks for your visit!".rjust(width // 2 + len("Thanks for your visit!") // 2))
+    bill_text.append("Thanks for your visit!".center(width))
+
+    bill_text.append("Visit Again!".center(width))
 
     bill_text.append("=" * width)
 
@@ -233,124 +289,6 @@ def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
     return formatted_bill_text, logo_path, pdf_url  # Return final formatted bill
 
 
-# def split_format_bill(
-#     order, payment, selected_items, total_payment_amount, vat, save_as_pdf=False
-# ):
-#     from apps.order.models import Payment
-
-#     bill_text = []
-#     width = 45  # Fixed width for formatting
-
-#     # Header (Centered Text)
-#     bill_text.append("=" * width)
-#     bill_text.append("TAX INVOICE".center(width))
-#     bill_text.append("=" * width)
-#     bill_text.append("Coffee Shop Co. L.L.C".center(width))
-#     bill_text.append("Shop 1, Block A".center(width))
-#     bill_text.append("Abraj Al Mamzar".center(width))
-#     bill_text.append("Dubai, UAE".center(width))
-#     bill_text.append("Ct: 0547606099 / 0559803445".center(width))
-#     bill_text.append("TRN: 104340270800001".center(width))
-#     bill_text.append("=" * width)
-#     bill_text.append("Split Bill".center(width))
-#     bill_text.append("=" * width)
-
-#     # Invoice and Order Details (Aligned)
-#     bill_text.append(
-#         f"Invoice No: {payment:<15} Table: {order.table.table_number or 'N/A':<15}"
-#     )
-#     bill_text.append(
-#         f"Order No: {order.id:<15} No Of Pax: {order.number_of_pax or 'N/A':<15}"
-#     )
-#     bill_text.append(f"Bill Date: {order.created_at.strftime('%d-%m-%Y')}")
-#     bill_text.append(f"Check In:  {order.created_at.strftime('%H:%M:%S')}")
-#     if order.check_out_time:
-#         bill_text.append(f"Check Out: {order.check_out_time.strftime('%H:%M:%S')}")
-#     else:
-#         bill_text.append(f"Check Out: N/A")
-#     bill_text.append(
-#         f"Shift: {order.shift or 'N/A':<15} Hall: {order.hall or 'N/A':<15}"
-#     )
-#     bill_text.append("=" * width)
-
-#     # Table Header (Aligned)
-#     bill_text.append(
-#         "{:<20} {:>6} {:>8} {:>10}".format("Item - UOM", "Qty", "Price", "Value")
-#     )
-#     bill_text.append("-" * width)
-
-#     # Order Items (only selected ones)
-#     for item_data in selected_items:
-#         product_name = item_data["product"].name
-#         product_name_ar = item_data["product"].name_ar
-#         quantity = item_data["quantity"]
-#         price = item_data["product"].price
-#         total = quantity * price
-
-#         # Wrap product names
-#         wrapped_product_name = textwrap.wrap(product_name, width=20)
-#         wrapped_product_name_ar = textwrap.wrap(product_name_ar, width=20)
-
-#         # Print English name first with values
-#         bill_text.append(
-#             "{:<20} {:>8} {:>14.2f} {:>14.2f}".format(
-#                 wrapped_product_name[0], quantity, price, total
-#             )
-#         )
-
-#         # Print additional wrapped English lines (if needed)
-#         for line in wrapped_product_name[1:]:
-#             bill_text.append("{:<20}".format(line))
-
-#         # Print Arabic name below (correct word order applied)
-#         for line in wrapped_product_name_ar:
-#             bill_text.append("{:<20}".format(line))
-
-#     bill_text.append("=" * width)
-
-#     # Totals (Aligned)
-#     bill_text.append("")
-#     bill_text.append(f"SubTotal:       AED {total_payment_amount:>7.2f}")
-#     bill_text.append(f"VAT (5%):       AED {vat:>7.2f}")
-#     bill_text.append("=" * width)
-#     bill_text.append(f"Grand Total:    AED {total_payment_amount:>7.2f}")
-#     bill_text.append("=" * width)
-
-#     # Collection Details
-#     try:
-#         payment_instance = Payment.objects.get(id=payment)
-#         bill_text.append("Collection Details:")
-#         bill_text.append("")
-#         bill_text.append(f"Payment Method: {payment_instance.payment_method}")
-#         bill_text.append("=" * width)
-#     except Payment.DoesNotExist:
-#         bill_text.append("Collection Details:")
-#         bill_text.append("Payment details not found.")
-#         bill_text.append("=" * width)
-
-#     # Closing Note
-#     bill_text.append("")
-#     bill_text.append("Thanks for your visit!".center(width))
-#     bill_text.append("Visit Again!".center(width))
-#     bill_text.append("=" * width)
-
-#     # Convert list to string
-#     formatted_bill_text = "\n".join(bill_text)
-
-#     # Get logo path
-#     logo_path = os.path.join(settings.MEDIA_ROOT, "default_photos", "logo.jpg")
-
-#     # Save PDF if needed
-#     pdf_url = None
-#     if save_as_pdf:
-#         filename = (
-#             f"invoice_{payment}.pdf" if payment else f"invoice_order_{order.id}.pdf"
-#         )
-#         pdf_path, pdf_url = save_bill_as_pdf(formatted_bill_text, filename, logo_path)
-
-#     return formatted_bill_text, logo_path, pdf_url  # Return final formatted bill
-
-
 def split_format_bill(
     order, payment, selected_items, total_payment_amount, vat, save_as_pdf=False
 ):
@@ -361,45 +299,46 @@ def split_format_bill(
 
     # Header (Centered Text)
     bill_text.append("=" * width)
-    bill_text.append("TAX INVOICE".rjust(width // 2 + len("TAX INVOICE") // 2))
+    bill_text.append("TAX INVOICE".center(width))
     bill_text.append("=" * width)
-    bill_text.append(
-        "Coffee Shop Co. L.L.C".rjust(width // 2 + len("Coffee Shop Co. L.L.C") // 2)
-    )
-    bill_text.append("Shop 1, Block A".rjust(width // 2 + len("Shop 1, Block A") // 2))
-    bill_text.append("Abraj Al Mamzar".rjust(width // 2 + len("Abraj Al Mamzar") // 2))
-    bill_text.append("Dubai, UAE".rjust(width // 2 + len("Dubai, UAE") // 2))
-    bill_text.append(
-        "Ct: 0547606099 / 0559803445".rjust(
-            width // 2 + len("Ct: 0547606099 / 0559803445") // 2
-        )
-    )
-    bill_text.append(
-        "TRN: 104340270800001".rjust(width // 2 + len("TRN: 104340270800001") // 2)
-    )
+    bill_text.append("Coffee Shop Co. L.L.C".center(width))
+    bill_text.append("Shop 1, Block A".center(width))
+    bill_text.append("Abraj Al Mamzar".center(width))
+    bill_text.append("Dubai, UAE".center(width))
+    bill_text.append("Ct: 0547606099 / 0559803445".center(width))
+    bill_text.append("TRN: 104340270800001".center(width))
     bill_text.append("=" * width)
-    bill_text.append("Split Bill".rjust(width // 2 + len("Split Bill") // 2))
+    bill_text.append("Split Bill".center(width))
     bill_text.append("=" * width)
 
     # Invoice and Order Details (Aligned)
     bill_text.append(
-        "{:<20} {:>20}".format(
+        "{:<25} {:<25}".format(
             f"Invoice No: {payment}", f"Table: {order.table.table_number or 'N/A'}"
         )
     )
     bill_text.append(
-        "{:<20} {:>20}".format(
+        "{:<25} {:<25}".format(
             f"Order No: {order.id}", f"No Of Pax: {order.number_of_pax or 'N/A'}"
         )
     )
-    bill_text.append(f"Bill Date: {order.created_at.strftime('%d-%m-%Y')}")
-    bill_text.append(f"Check In:  {order.created_at.strftime('%H:%M:%S')}")
-    if order.check_out_time:
-        bill_text.append(f"Check Out: {order.check_out_time.strftime('%H:%M:%S')}")
-    else:
-        bill_text.append(f"Check Out: N/A")
     bill_text.append(
-        "{:<20} {:>20}".format(
+        "{:<25} {:<25}".format(
+            f"Bill Date: {order.created_at.strftime('%d-%m-%Y')}", ""
+        )
+    )
+    bill_text.append(
+        "{:<25} {:<25}".format(f"Check In: {order.created_at.strftime('%H:%M:%S')}", "")
+    )
+    bill_text.append(
+        "{:<25} {:<25}".format(
+            f"Check Out: {order.check_out_time.strftime('%H:%M:%S') if order.check_out_time else 'N/A'}",
+            "",
+        )
+    )
+
+    bill_text.append(
+        "{:<25} {:<25}".format(
             f"Shift: {order.shift or 'N/A'}", f"Hall: {order.hall or 'N/A'}"
         )
     )
@@ -434,7 +373,7 @@ def split_format_bill(
         )
 
         # Print additional wrapped English lines
-        for line in wrapped_product_name[1:]:
+        for line in wrapped_product_name[0:]:
             bill_text.append("{:<20}".format(line))
 
         # Print Arabic name below (correct word order applied)
@@ -445,30 +384,28 @@ def split_format_bill(
 
     # Totals (Aligned)
     bill_text.append("")
-    bill_text.append(f"SubTotal:       AED {total_payment_amount:>7.2f}")
-    bill_text.append(f"VAT (5%):       AED {vat:>7.2f}")
+    bill_text.append(f"{'SubTotal:':<25} AED {order.final_total:7.2f}")
+    bill_text.append(f"{'VAT (5%):':<25} AED {vat:7.2f}")
     bill_text.append("=" * width)
-    bill_text.append(f"Grand Total:    AED {total_payment_amount:>7.2f}")
+    bill_text.append(f"{'Grand Total:':<25} AED {total_payment_amount:7.2f}")
     bill_text.append("=" * width)
 
     # Collection Details
     try:
         payment_instance = Payment.objects.get(id=payment)
-        bill_text.append("Collection Details:")
+        bill_text.append("Collection Details:".center(width))
         bill_text.append("")
         bill_text.append(f"Payment Method: {payment_instance.payment_method}")
         bill_text.append("=" * width)
     except Payment.DoesNotExist:
-        bill_text.append("Collection Details:")
+        bill_text.append("Collection Details:".center(width))
         bill_text.append("Payment details not found.")
         bill_text.append("=" * width)
 
     # Closing Note
     bill_text.append("")
-    bill_text.append(
-        "Thanks for your visit!".rjust(width // 2 + len("Thanks for your visit!") // 2)
-    )
-    bill_text.append("Visit Again!".rjust(width // 2 + len("Visit Again!") // 2))
+    bill_text.append("Thanks for your visit!".center(width))
+    bill_text.append("Visit Again!".center(width))
     bill_text.append("=" * width)
 
     # Convert list to string
@@ -488,159 +425,49 @@ def split_format_bill(
     return formatted_bill_text, logo_path, pdf_url  # Return final formatted bill
 
 
-# def group_format_bill(orders, payment, total_payment_amount, vat, save_as_pdf=False):
-#     from apps.order.models import Payment, OrderItems
-#     from django.utils.timezone import localtime
-
-#     bill_text = []
-#     width = 45  # Fixed width for formatting
-
-#     # Header (Centered Text)
-#     bill_text.append("=" * width)
-#     bill_text.append("TAX INVOICE".center(width))
-#     bill_text.append("=" * width)
-#     bill_text.append("Coffee Shop Co. L.L.C".center(width))
-#     bill_text.append("Shop 1, Block A".center(width))
-#     bill_text.append("Abraj Al Mamzar".center(width))
-#     bill_text.append("Dubai, UAE".center(width))
-#     bill_text.append("Ct: 0547606099 / 0559803445".center(width))
-#     bill_text.append(f"TRN: 104340270800001".center(width))
-#     bill_text.append("=" * width)
-#     bill_text.append("Group Bill".center(width))
-#     bill_text.append("=" * width)
-
-#     order_ids = [str(order.id) for order in orders]
-#     table_numbers = [
-#         str(order.table.table_number) if order.table else "N/A" for order in orders
-#     ]
-#     total_pax = sum(order.number_of_pax or 0 for order in orders)
-#     earliest_check_in = min(order.created_at for order in orders)
-#     total_discount = sum(
-#         order.discount.value if order.discount else Decimal("0.00") for order in orders
-#     )
-
-#     # Invoice and Order Details
-#     bill_text.append(f"Invoice No: {payment:<15} Table: ({'-'.join(table_numbers)})")
-#     bill_text.append(
-#         f"Order No: ({'-'.join(order_ids):<15}) No Of Pax: {total_pax:<15}"
-#     )
-#     bill_text.append(f"Bill Date: {localtime().strftime('%d-%m-%Y')}")
-#     bill_text.append(f"Check In:  {earliest_check_in.strftime('%H:%M:%S')}")
-#     bill_text.append(f"Check Out: {localtime().strftime('%H:%M:%S')}")
-#     bill_text.append("=" * width)
-
-#     # Table Header
-#     bill_text.append(
-#         "{:<20} {:>6} {:>8} {:>10}".format("Item - UOM", "Qty", "Price", "Value")
-#     )
-#     bill_text.append("-" * width)
-
-#     item_totals = {}
-
-#     for order in orders:
-#         order_items = OrderItems.objects.filter(order=order, remaining_quantity__gt=0)
-
-#         for item in order_items:
-#             product_name = item.product.name
-#             product_name_ar = item.product.name_ar
-#             quantity = item.quantity
-#             price = item.product.price
-#             total = quantity * price
-
-#             if product_name in item_totals:
-#                 item_totals[product_name]["quantity"] += quantity
-#                 item_totals[product_name]["total"] += total
-#             else:
-#                 item_totals[product_name] = {
-#                     "quantity": quantity,
-#                     "price": price,
-#                     "total": total,
-#                 }
-
-#     for product_name, data in item_totals.items():
-#         wrapped_product_name = textwrap.wrap(product_name, width=20)
-
-#         bill_text.append(
-#             "{:<20} {:>6} {:>8.2f} {:>10.2f}".format(
-#                 wrapped_product_name[0], data["quantity"], data["price"], data["total"]
-#             )
-#         )
-
-#     bill_text.append("=" * width)
-
-#     # Totals
-#     grand_total = total_payment_amount - total_discount
-#     bill_text.append(f"Grand Total:    AED {grand_total:.2f}")
-#     bill_text.append("=" * width)
 
 
-#     formatted_bill_text = "\n".join(bill_text)
-#     logo_path = os.path.join(settings.MEDIA_ROOT, "default_photos", "logo.jpg")
-#     # Save PDF if needed
-#     pdf_url = None
-#     if save_as_pdf:
-#         filename = f"invoice_{payment}.pdf" if payment else f"invoice_order_{order.id}.pdf"
-#         pdf_path, pdf_url = save_bill_as_pdf(formatted_bill_text, filename, logo_path)
-#     return formatted_bill_text, logo_path, pdf_url
+
+
 def group_format_bill(orders, payment, total_payment_amount, vat, save_as_pdf=False):
     from apps.order.models import Payment, OrderItems
     from django.utils.timezone import localtime
+
 
     bill_text = []
     width = 45  # Fixed width for formatting
 
     # Header (Centered Text)
     bill_text.append("=" * width)
-    bill_text.append("TAX INVOICE".rjust(width // 2 + len("TAX INVOICE") // 2))
+    bill_text.append("TAX INVOICE".center(width))
     bill_text.append("=" * width)
-    bill_text.append(
-        "Coffee Shop Co. L.L.C".rjust(width // 2 + len("Coffee Shop Co. L.L.C") // 2)
-    )
-    bill_text.append("Shop 1, Block A".rjust(width // 2 + len("Shop 1, Block A") // 2))
-    bill_text.append("Abraj Al Mamzar".rjust(width // 2 + len("Abraj Al Mamzar") // 2))
-    bill_text.append("Dubai, UAE".rjust(width // 2 + len("Dubai, UAE") // 2))
-    bill_text.append(
-        "Ct: 0547606099 / 0559803445".rjust(
-            width // 2 + len("Ct: 0547606099 / 0559803445") // 2
-        )
-    )
-    bill_text.append(
-        "TRN: 104340270800001".rjust(width // 2 + len("TRN: 104340270800001") // 2)
-    )
+    bill_text.append("Coffee Shop Co. L.L.C".center(width))
+    bill_text.append("Shop 1, Block A".center(width))
+    bill_text.append("Abraj Al Mamzar".center(width))
+    bill_text.append("Dubai, UAE".center(width))
+    bill_text.append("Ct: 0547606099 / 0559803445".center(width))
+    bill_text.append("TRN: 104340270800001".center(width))
     bill_text.append("=" * width)
-    bill_text.append("Group Bill".rjust(width // 2 + len("Group Bill") // 2))
+    bill_text.append("Group Bill".center(width))
     bill_text.append("=" * width)
 
+    # Aggregate order data
     order_ids = [str(order.id) for order in orders]
-    table_numbers = [
-        str(order.table.table_number) if order.table else "N/A" for order in orders
-    ]
+    table_numbers = [str(order.table.table_number) if order.table else "N/A" for order in orders]
     total_pax = sum(order.number_of_pax or 0 for order in orders)
     earliest_check_in = min(order.created_at for order in orders)
-    total_discount = sum(
-        order.discount.value if order.discount else Decimal("0.00") for order in orders
-    )
+    total_discount = sum(order.discount.value if order.discount else Decimal("0.00") for order in orders)
 
     # Invoice and Order Details (Aligned)
-    bill_text.append(
-        "{:<20} {:>20}".format(
-            f"Invoice No: {payment}", f"Tables: ({'-'.join(table_numbers)})"
-        )
-    )
-    bill_text.append(
-        "{:<20} {:>20}".format(
-            f"Orders: ({'-'.join(order_ids)})", f"No Of Pax: {total_pax}"
-        )
-    )
-    bill_text.append(f"Bill Date: {localtime().strftime('%d-%m-%Y')}")
-    bill_text.append(f"Check In:  {earliest_check_in.strftime('%H:%M:%S')}")
-    bill_text.append(f"Check Out: {localtime().strftime('%H:%M:%S')}")
+    bill_text.append("{:<25} {:<25}".format(f"Invoice No: {payment}", f"Tables: ({'-'.join(table_numbers)})"))
+    bill_text.append("{:<25} {:<25}".format(f"Orders: ({'-'.join(order_ids)})", f"No Of Pax: {total_pax}"))
+    bill_text.append("{:<25}".format(f"Bill Date: {localtime().strftime('%d-%m-%Y')}"))
+    bill_text.append("{:<25}".format(f"Check In:  {earliest_check_in.strftime('%H:%M:%S')}"))
+    bill_text.append("{:<25}".format(f"Check Out: {localtime().strftime('%H:%M:%S')}"))
     bill_text.append("=" * width)
 
     # Table Header (Aligned)
-    bill_text.append(
-        "{:<20} {:>5} {:>8} {:>8}".format("Item - UOM", "Qty", "Price", "Value")
-    )
+    bill_text.append("{:<20} {:>5} {:>8} {:>8}".format("Item - UOM", "Qty", "Price", "Value"))
     bill_text.append("-" * width)
 
     # Aggregating item quantities across multiple orders
@@ -648,11 +475,10 @@ def group_format_bill(orders, payment, total_payment_amount, vat, save_as_pdf=Fa
 
     for order in orders:
         order_items = OrderItems.objects.filter(order=order, remaining_quantity__gt=0)
-
         for item in order_items:
             product_name = item.product.name
             product_name_ar = item.product.name_ar
-            quantity = item.quantity
+            quantity = item.remaining_quantity
             price = item.product.price
             total = quantity * price
 
@@ -664,21 +490,25 @@ def group_format_bill(orders, payment, total_payment_amount, vat, save_as_pdf=Fa
                     "quantity": quantity,
                     "price": price,
                     "total": total,
+                    "name_ar": product_name_ar
                 }
 
     # Print formatted items
     for product_name, data in item_totals.items():
         wrapped_product_name = textwrap.wrap(product_name, width=20)
+        wrapped_product_name_ar = textwrap.wrap(data["name_ar"], width=20)
 
-        # Print first line of product name with values
-        bill_text.append(
-            "{:<20} {:>5} {:>8.2f} {:>8.2f}".format(
-                wrapped_product_name[0], data["quantity"], data["price"], data["total"]
-            )
-        )
+        # Print English name first with values
+        bill_text.append("{:<20} {:>5} {:>8} {:>8}".format(
+            wrapped_product_name[0], data["quantity"], data["price"], data["total"]
+        ))
 
-        # Print additional wrapped lines for product name
+        # Print additional wrapped English lines (if needed)
         for line in wrapped_product_name[1:]:
+            bill_text.append("{:<20}".format(line))
+
+        # Print Arabic name below
+        for line in wrapped_product_name_ar:
             bill_text.append("{:<20}".format(line))
 
     bill_text.append("=" * width)
@@ -686,32 +516,29 @@ def group_format_bill(orders, payment, total_payment_amount, vat, save_as_pdf=Fa
     # Totals (Aligned)
     grand_total = total_payment_amount - total_discount
     bill_text.append("")
-    bill_text.append(f"SubTotal:       AED {total_payment_amount:>7.2f}")
-    bill_text.append(f"Discount:       AED -{total_discount:>7.2f}")
-    bill_text.append(f"VAT (5%):       AED {vat:>7.2f}")
+    bill_text.append(f"{'SubTotal:':<25} AED {total_payment_amount:7.2f}")
+    bill_text.append(f"{'Discount:':<25} AED -{total_discount:6.2f}")
+    bill_text.append(f"{'VAT (5%):':<25} AED {vat:7.2f}")
     bill_text.append("=" * width)
-    bill_text.append(f"Grand Total:    AED {grand_total:>7.2f}")
+    bill_text.append(f"{'Grand Total:':<25} AED {grand_total:7.2f}")
     bill_text.append("=" * width)
 
     # Collection Details
     try:
         payment_instance = Payment.objects.get(id=payment)
-        bill_text.append("Collection Details:")
+        bill_text.append("Collection Details:".center(width))
         bill_text.append("")
         bill_text.append(f"Payment Method: {payment_instance.payment_method}")
         bill_text.append("=" * width)
     except Payment.DoesNotExist:
-        bill_text.append("Collection Details:")
+        bill_text.append("Collection Details:".center(width))
         bill_text.append("Payment details not found.")
         bill_text.append("=" * width)
 
-    # Closing Note (Centered)
+    # Closing Note
     bill_text.append("")
-    bill_text.append(
-        "Thanks for your visit!".rjust(width // 2 + len("Thanks for your visit!") // 2)
-    )
-    bill_text.append("Visit Again!".rjust(width // 2 + len("Visit Again!") // 2))
-
+    bill_text.append("Thanks for your visit!".center(width))
+    bill_text.append("Visit Again!".center(width))
     bill_text.append("=" * width)
 
     # Convert list to string
@@ -723,10 +550,13 @@ def group_format_bill(orders, payment, total_payment_amount, vat, save_as_pdf=Fa
     # Save PDF if needed
     pdf_url = None
     if save_as_pdf:
-        filename = (
-            f"invoice_{payment}.pdf" if payment else f"invoice_order_{order.id}.pdf"
-        )
+        if payment:
+            filename = f"invoice_{payment}.pdf"
+        else:
+            random_number = random.randint(100000, 999999)  # Generate a 6-digit random number
+            filename = f"invoice_order_{order.id}_{random_number}.pdf"
         pdf_path, pdf_url = save_bill_as_pdf(formatted_bill_text, filename, logo_path)
+
     return formatted_bill_text, logo_path, pdf_url
 
 
@@ -816,43 +646,7 @@ def save_bill_as_pdf(bill_text, filename, logo_path=None):
     return pdf_path, pdf_url  # Return both file path and public URL
 
 
-# def print_to_printer(printer_ip, bill_text, logo_path=None):
-#     """Send text to the thermal printer as an image."""
-#     try:
-#         # printer = Dummy()  # Use Network(printer_ip) for actual printing
-#         printer = Network(printer_ip)
-#         # ✅ Print logo if provided
-#         if logo_path and os.path.exists(logo_path):
-#             logo = Image.open(logo_path).convert("L")
-#             logo = logo.resize((256, int(logo.height * (256 / logo.width))))
-#             printer.set(align="center")
-#             printer.image(logo)
-#             printer.text("\n")
-
-#         # ✅ Generate the bill image
-#         font_path = os.path.join(
-#             settings.BASE_DIR, "fonts", "NotoSansArabic-VariableFont_wdth,wght.ttf"
-#         )
-#         bill_image_path = create_bill_image(bill_text, font_path)
-
-#         # ✅ Print the image
-#         printer.image(bill_image_path)
-
-#         # ✅ Cut the paper
-#         printer.cut()
-#         printer.cashdraw(2)
-
-#         print(f"Print job sent to printer at {printer_ip}")
-
-#         # ✅ Cleanup temporary file
-#         os.remove(bill_image_path)
-
-#     except Exception as e:
-#         print(f"Failed to print to {printer_ip}: {e}")
-
-
 def print_to_printer(printer_ip, bill_text, logo_path=None, simulate_terminal=True):
-    """Send text to the thermal printer and optionally simulate in the terminal."""
     try:
         # ✅ Simulate printing in terminal
         if simulate_terminal:
@@ -860,47 +654,58 @@ def print_to_printer(printer_ip, bill_text, logo_path=None, simulate_terminal=Tr
             print(" " * 10 + "PRINT PREVIEW")
             print("=" * 40)
 
-            # Simulate logo
             if logo_path and os.path.exists(logo_path):
                 print("[LOGO IMAGE]\n")
 
-            print(bill_text)  # Print bill text in terminal
+            print(bill_text)
             print("=" * 40 + "\n")
 
-        # ✅ Send to actual thermal printer
         printer = Network(printer_ip)
 
         # ✅ Print logo if available
         if logo_path and os.path.exists(logo_path):
             logo = Image.open(logo_path).convert("L")
-            logo = logo.resize((256, int(logo.height * (256 / logo.width))))
+            logo = logo.resize(
+                (256, int(logo.height * (256 / logo.width)))
+            )  # Adjust for 80mm printer
             printer.set(align="center")
             printer.image(logo)
             printer.text("\n")
 
-        # ✅ Generate bill image from text
-        font_path = os.path.join(
-            settings.BASE_DIR, "fonts", "Amiri-Regular.ttf"
-        )
-        bill_image_path = create_bill_image(bill_text, font_path)
+        # ✅ Load Arabic font
+        arabic_font_path = os.path.join(
+            os.getcwd(), "fonts", "Amiri-Regular.ttf"
+        )  # Ensure correct path
+        arabic_font = ImageFont.truetype(
+            arabic_font_path, 28
+        )  # ✅ 28pt size for better visibility
 
-        # ✅ Print the image
-        printer.image(bill_image_path)
-        printer.text("\n" * 3)  # Use new lines instead of `feed()`
+        # ✅ Print bill text line by line (handling Arabic separately)
+        chunk_size = 5  # ✅ Send in small chunks to prevent buffer overflow
+        lines = bill_text.split("\n")
 
+        for i in range(0, len(lines), chunk_size):
+            chunk = lines[i : i + chunk_size]
+            for line in chunk:
+                if is_arabic_text(line):
+                    formatted_line = format_arabic_text(line)
+                    img_bytes = arabic_text_to_image(formatted_line, arabic_font_path)
+                    printer.image(img_bytes)
+                else:
+                    printer.text(line + "\n")
+
+            printer.text("\n")  # ✅ Allow printer to process previous chunk
+            time.sleep(0.5)  # ✅ Small delay for network processing
 
         # ✅ Cut the paper & open cash drawer
         printer.cut()
-
         printer.cashdraw(2)
 
-        print(f"Print job sent to printer at {printer_ip}")
-
-        # ✅ Cleanup temporary file
-        os.remove(bill_image_path)
+        print(f" Print job sent successfully to {printer_ip}")
 
     except Exception as e:
-        print(f"Failed to print to {printer_ip}: {e}")
+        print(f" Failed to print to {printer_ip}: {e}")
+
 
 
 def generate_report(source):
@@ -1232,7 +1037,7 @@ def generate_report_for_period(business_days):
     }
 
 
-def print_period_report(report_data, report_type,start_date,end_date):
+def print_period_report(report_data, report_type, start_date, end_date):
     """
     Print a formatted sales report for a given period based on multiple business days.
     """
@@ -1261,9 +1066,7 @@ def print_period_report(report_data, report_type,start_date,end_date):
         # 1️ **Report Title & Date Range**
         print_centered("IBN EZZ COFFEE SHOP CO. L.L.C")
         print_centered(f"{report_type} REPORT")
-        printer.text(
-            f"FROM: {start_date} TO {end_date}\n"
-        )
+        printer.text(f"FROM: {start_date} TO {end_date}\n")
         printer.text(f"PRINTED ON: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         print_line()
 
