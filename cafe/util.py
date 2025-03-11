@@ -84,47 +84,590 @@ def is_arabic_text(text):
 #     return temp_img.name
 
 
-def arabic_text_to_image(text, font_path, font_size=18):
-    """Convert Arabic text to an in-memory image for better printing"""
-    font = ImageFont.truetype(font_path, font_size)
-
-    img_width = 576  # ✅ 80mm paper width
-    img_height = font_size + 10  # Adjust height dynamically
-
-    img = Image.new("RGB", (img_width, img_height), "white")
-    draw = ImageDraw.Draw(img)
-    draw.text((10, 5), text, font=font, fill="black")
-
-    # ✅ Convert image to in-memory bytes (no file storage)
-    img_bytes = io.BytesIO()
-    img.save(img_bytes, format="PNG")
-    img_bytes.seek(0)
-
-    return img_bytes
-
-
 # def arabic_text_to_image(text, font_path, font_size=18):
-#     """Convert Arabic text to an in-memory image for better printing"""
+#     """Convert Arabic text to an in-memory image with reduced white space."""
 #     font = ImageFont.truetype(font_path, font_size)
 
-#     img_width = 576  # ✅ 80mm paper width
-
-#     # 🔹 Measure text size and adjust height dynamically
-#     dummy_img = Image.new("RGB", (1, 1))
+#     # Measure text size and position
+#     dummy_img = Image.new("RGB", (1000, 500), "white")  # Large temporary image
 #     dummy_draw = ImageDraw.Draw(dummy_img)
-#     text_width, text_height = dummy_draw.textsize(text, font=font)
-#     img_height = text_height + 20  # Extra padding for better visibility
+#     text_bbox = dummy_draw.textbbox((0, 0), text, font=font)
+
+#     # Extract text dimensions
+#     text_width = text_bbox[2] - text_bbox[0]
+#     text_height = text_bbox[3] - text_bbox[1]
+#     text_offset_y = text_bbox[1]  # Top offset to adjust spacing
+
+#     # Create an optimized image
+#     img_width = max(576, text_width + 20)  # Ensure enough width
+#     img_height = text_height + 10  # Reduce unnecessary space
 
 #     img = Image.new("RGB", (img_width, img_height), "white")
 #     draw = ImageDraw.Draw(img)
-#     draw.text((10, 10), text, font=font, fill="black")  # Increased y-padding
+#     draw.text((10, -text_offset_y + 5), text, font=font, fill="black")  # Adjust text positioning
 
-#     # ✅ Convert image to in-memory bytes (no file storage)
+#     # Convert image to in-memory bytes (no file storage)
 #     img_bytes = io.BytesIO()
 #     img.save(img_bytes, format="PNG")
 #     img_bytes.seek(0)
 
 #     return img_bytes
+
+
+# Arabic text to image caching dictionary
+
+ARABIC_TEXT_CACHE = {}
+
+
+def arabic_text_to_image(text, font_path, font_size=18):
+    """Convert Arabic text to an in-memory image with caching."""
+
+    # Ensure the Arabic text is correctly reshaped
+    formatted_text = format_arabic_text(text)
+
+    if formatted_text in ARABIC_TEXT_CACHE:
+        return ARABIC_TEXT_CACHE[formatted_text]
+
+    font = ImageFont.truetype(font_path, font_size)
+
+    # Measure text size and position
+    dummy_img = Image.new("RGB", (1000, 500), "white")
+    dummy_draw = ImageDraw.Draw(dummy_img)
+    text_bbox = dummy_draw.textbbox((0, 0), formatted_text, font=font)
+
+    # Extract text dimensions
+    text_width = text_bbox[2] - text_bbox[0]
+    text_height = text_bbox[3] - text_bbox[1]
+    text_offset_y = text_bbox[1]
+
+    # Create an optimized image
+    img_width = max(536, text_width + 20)
+    img_height = text_height + 10
+
+    img = Image.new("RGB", (img_width, img_height), "white")
+    draw = ImageDraw.Draw(img)
+    draw.text((10, -text_offset_y + 5), formatted_text, font=font, fill="black")
+
+    # Convert image to in-memory bytes
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format="PNG")
+    img_bytes.seek(0)
+
+    ARABIC_TEXT_CACHE[formatted_text] = img_bytes  # Cache the image
+    return img_bytes
+
+
+def print_bill_escpos(
+    order,
+    payment,
+    total_payment_amount,
+    vat,
+    printer_ip,
+    logo_path=None,
+):
+    """Prints the bill efficiently using escpos without logging or simulation."""
+
+    arabic_font_path = os.path.join(os.getcwd(), "fonts", "Amiri-Regular.ttf")
+    from apps.order.models import Payment
+
+    try:
+        printer = Network(printer_ip)
+        width = 40  # Adjusted width for alignment
+
+        def print_text(text, align="left", width=1, height=1):
+            """Helper function to print text with proper alignment and adjustable size."""
+            printer.set(align=align, custom_size=True, width=width, height=height)
+            printer.text(text + "\n")
+            # time.sleep(0.05)
+
+        def print_line():
+            """Helper function to print a separator line."""
+            line = "=" * width
+            printer.text(line + "\n")
+
+        # ✅ Print logo if available
+        if logo_path and os.path.exists(logo_path):
+            logo = Image.open(logo_path).convert("L")
+            logo = logo.resize((256, int(logo.height * (256 / logo.width))))
+            printer.set(align="center")
+            printer.image(logo)
+            printer.text("\n")
+
+        # Header
+        print_line()
+        print_text("TAX INVOICE", align="center")
+        print_line()
+        print_text("Coffee Shop Co. L.L.C", align="center")
+        print_text("Shop 1, Block A", align="center")
+        print_text("Abraj Al Mamzar", align="center")
+        print_text("Dubai, UAE", align="center")
+        print_text("Ct: 0547606099 / 0559803445", align="center")
+        print_text("TRN: 104340270800001", align="center")
+        print_line()
+        print_text("Checkout Bill", align="center")
+        print_line()
+
+        # Invoice Details
+        invoice_no = payment if payment else "N/A"
+        table_number = order.table.table_number if order.table else "N/A"
+        order_no = order.id if order.id else "N/A"
+        pax = order.number_of_pax if order.number_of_pax else "N/A"
+        bill_date = order.created_at.strftime("%d-%m-%Y") if order.created_at else "N/A"
+        check_in = order.created_at.strftime("%H:%M") if order.created_at else "N/A"
+        check_out = (
+            order.check_out_time.strftime("%H:%M") if order.check_out_time else "N/A"
+        )
+        shift = order.shift if order.shift else "N/A"
+        hall = order.hall if order.hall else "N/A"
+
+        invoice_details = "\n".join(
+            [
+                "{:<25} {:<15}".format(
+                    f"Invoice No: {invoice_no}", f"Table: {table_number}"
+                ),
+                "{:<25} {:<15}".format(f"Order No: {order_no}", f"No Of Pax: {pax}"),
+                "{:<25} {:<15}".format(f"Bill Date: {bill_date}", ""),
+                "{:<25} {:<15}".format(
+                    f"Check In: {check_in}", f"Check Out: {check_out}"
+                ),
+                "{:<25} {:<15}".format(f"Shift: {shift}", f"Hall: {hall}"),
+            ]
+        )
+
+        print_text(invoice_details)
+        print_line()
+
+        # Table Header
+        print_text(
+            "{:<20} {:>4} {:>6} {:>6}".format("Item - UOM", "Qty", "Price", "Value")
+        )
+        print_text("-" * width)
+
+        # Order Items Processing
+        order_items = order.order_items.filter(remaining_quantity__gt=0)
+        for item_data in order_items:
+            try:
+                product_name = item_data.product.name or "N/A"
+                product_name_ar = item_data.product.name_ar or "N/A"
+                quantity = item_data.remaining_quantity or 0
+                price = item_data.product.price or 0.00
+                total = quantity * price
+
+                # Wrap English text efficiently
+                wrapped_product_name = textwrap.wrap(product_name, width=20)
+
+                # Print the first wrapped line with quantity, price, and total
+                print_text(
+                    "{:<20} {:>4} {:>6.2f} {:>6.2f}".format(
+                        wrapped_product_name[0], quantity, price, total
+                    )
+                )
+
+                # Print remaining wrapped lines
+                for line in wrapped_product_name[1:]:
+                    print_text("{:<20}".format(line))
+
+                # Print Arabic name as an image if available
+                if product_name_ar:
+                    arabic_image_bytes = arabic_text_to_image(
+                        product_name_ar, arabic_font_path
+                    )
+                    arabic_image = Image.open(arabic_image_bytes)
+                    printer.image(arabic_image)
+
+            except Exception as e:
+                print(f"[ERROR] Printing item failed: {e}")
+
+        print_line()
+
+        # Totals
+        final_total = order.final_total or 0.00
+        discount = order.discount.value if order.discount else 0.00
+        vat_amount = vat or 0.00
+
+        print_text(f"{'SubTotal:':<25} AED {final_total:7.2f}")
+        print_text(f"{'Discount:':<25} AED -{discount:6.2f}")
+        print_text(f"{'VAT (5%):':<25} AED {vat_amount:7.2f}")
+        print_line()
+        print_text(f"{'Grand Total:':<25} AED {total_payment_amount:7.2f}")
+        print_line()
+
+        # Collection Details
+        try:
+            payment_instance = Payment.objects.get(id=payment)
+            print_text("Collection Details", align="center")
+            print_text(f"Payment Method: {payment_instance.payment_method or 'N/A'}")
+        except Payment.DoesNotExist:
+            print_text("Collection Details", align="center")
+            print_text("Payment details not found.")
+        print_line()
+
+        # Closing Note
+        print_text("Thanks for your visit!", align="center")
+        print_text("Visit Again!", align="center")
+        print_line()
+
+        # Cut the paper
+        printer.cut()
+        printer.cashdraw(2)
+
+    except Exception as e:
+        print(f"[ERROR] Printer connection failed: {e}")
+
+
+def print_split_bill_escpos(
+    order,
+    payment,
+    selected_items,
+    total_payment_amount,
+    vat,
+    printer_ip,
+    logo_path=None,
+):
+    """Prints the split bill efficiently using escpos without logging or simulation."""
+
+    arabic_font_path = os.path.join(os.getcwd(), "fonts", "Amiri-Regular.ttf")
+    from apps.order.models import Payment
+
+    try:
+        # from escpos.printer import Usb
+        # vid=0x1504
+        # pid=0x1F
+        # printer =Usb(vid,pid)
+        printer = Network(printer_ip)
+
+        width = 40  # Adjusted width for alignment
+
+        def print_text(text, align="left", width=1, height=1):
+            """Helper function to print text with proper alignment and adjustable size."""
+            printer.set(align=align, custom_size=True, width=width, height=height)
+            printer.text(text + "\n")
+            # time.sleep(0.05)
+
+        def print_line():
+            """Helper function to print a separator line."""
+            line = "=" * width
+            printer.text(line + "\n")
+
+        # ✅ Print logo if available
+        if logo_path and os.path.exists(logo_path):
+            logo = Image.open(logo_path).convert("L")
+            logo = logo.resize((256, int(logo.height * (256 / logo.width))))
+            printer.set(align="center")
+            printer.image(logo)
+            printer.text("\n")
+
+        # Header
+        print_line()
+        print_text("TAX INVOICE", align="center")
+        print_line()
+        print_text("Coffee Shop Co. L.L.C", align="center")
+        print_text("Shop 1, Block A", align="center")
+        print_text("Abraj Al Mamzar", align="center")
+        print_text("Dubai, UAE", align="center")
+        print_text("Ct: 0547606099 / 0559803445", align="center")
+        print_text("TRN: 104340270800001", align="center")
+        print_line()
+        print_text("Split Bill", align="center")
+        print_line()
+
+        # Invoice Details
+        invoice_no = payment if payment else "N/A"
+        table_number = order.table.table_number if order.table else "N/A"
+        order_no = order.id if order.id else "N/A"
+        pax = order.number_of_pax if order.number_of_pax else "N/A"
+        bill_date = order.created_at.strftime("%d-%m-%Y") if order.created_at else "N/A"
+        check_in = order.created_at.strftime("%H:%M") if order.created_at else "N/A"
+        check_out = (
+            order.check_out_time.strftime("%H:%M") if order.check_out_time else "N/A"
+        )
+        shift = order.shift if order.shift else "N/A"
+        hall = order.hall if order.hall else "N/A"
+
+        invoice_details = "\n".join(
+            [
+                "{:<25} {:<15}".format(
+                    f"Invoice No: {invoice_no}", f"Table: {table_number}"
+                ),
+                "{:<25} {:<15}".format(f"Order No: {order_no}", f"No Of Pax: {pax}"),
+                "{:<25} {:<15}".format(f"Bill Date: {bill_date}", ""),
+                "{:<25} {:<25}".format(
+                    f"Check In: {check_in}", f"Check Out: {check_out}"
+                ),
+                "{:<25} {:<15}".format(f"Shift: {shift}", f"Hall: {hall}"),
+            ]
+        )
+
+        print_text(invoice_details)
+        print_line()
+
+        # Table Header
+        print_text(
+            "{:<20} {:>4} {:>6} {:>6}".format("Item - UOM", "Qty", "Price", "Value")
+        )
+        print_text("-" * width)
+
+        # Order Items (only selected ones)
+        for item_data in selected_items:
+            try:
+                product_name = item_data["product"].name
+                product_name_ar = item_data["product"].name_ar
+                quantity = item_data["quantity"]
+                price = item_data["product"].price
+                total = quantity * price
+
+                # Wrap English text efficiently
+                wrapped_product_name = textwrap.wrap(product_name, width=20)
+
+                # Print the first wrapped line with quantity, price, and total
+                print_text(
+                    "{:<20} {:>4} {:>6.2f} {:>6.2f}".format(
+                        wrapped_product_name[0], quantity, price, total
+                    )
+                )
+
+                # Print remaining wrapped lines
+                for line in wrapped_product_name[1:]:
+                    print_text("{:<20}".format(line))
+
+                # Print Arabic name as an image if available
+                if product_name_ar:
+                    arabic_image_bytes = arabic_text_to_image(
+                        product_name_ar, arabic_font_path
+                    )
+                    arabic_image = Image.open(arabic_image_bytes)
+                    printer.image(arabic_image)
+
+            except Exception as e:
+                print(f"[ERROR] Printing item failed: {e}")
+
+        print_line()
+
+        # Totals
+        final_total = total_payment_amount
+        discount = order.discount.value if order.discount else 0.00
+        vat_amount = vat or 0.00
+
+        print_text(f"{'SubTotal:':<25} AED {final_total:7.2f}")
+        print_text(f"{'Discount:':<25} AED -{discount:6.2f}")
+        print_text(f"{'VAT (5%):':<25} AED {vat_amount:7.2f}")
+        print_line()
+        print_text(f"{'Grand Total:':<25} AED {total_payment_amount:7.2f}")
+        print_line()
+
+        # Collection Details
+        try:
+            payment_instance = Payment.objects.get(id=payment)
+            print_text("Collection Details", align="center")
+            print_text(f"Payment Method: {payment_instance.payment_method or 'N/A'}")
+        except Payment.DoesNotExist:
+            print_text("Collection Details", align="center")
+            print_text("Payment details not found.")
+        print_line()
+
+        # Closing Note
+        print_text("Thanks for your visit!", align="center")
+        print_text("Visit Again!", align="center")
+        print_line()
+
+        # Cut the paper
+        printer.cut()
+        printer.cashdraw(2)
+
+    except Exception as e:
+        print(f"[ERROR] Printer connection failed: {e}")
+
+
+def print_group_bill_escpos(
+    orders,
+    payment,
+    total_payment_amount,
+    vat,
+    printer_ip,
+    logo_path=None,
+):
+    """Prints a grouped bill receipt using a network thermal printer without logging or simulation."""
+
+    arabic_font_path = os.path.join(os.getcwd(), "fonts", "Amiri-Regular.ttf")
+    from apps.order.models import Payment, OrderItems
+    from django.utils.timezone import localtime
+
+    try:
+        # from escpos.printer import Usb
+        # vid=0x1504
+        # pid=0x1F
+        # printer =Usb(vid,pid)
+        printer = Network(printer_ip)
+        width = 40  # Adjusted width for alignment
+
+        def print_text(text, align="left", width=1, height=1):
+            """Helper function to print text with proper alignment and adjustable size."""
+            printer.set(align=align, custom_size=True, width=width, height=height)
+            printer.text(text + "\n")
+            # time.sleep(0.05)
+
+        def print_line():
+            """Helper function to print a separator line."""
+            line = "=" * width
+            printer.text(line + "\n")
+
+        # ✅ Print logo if available
+        if logo_path and os.path.exists(logo_path):
+            logo = Image.open(logo_path).convert("L")
+            logo = logo.resize((256, int(logo.height * (256 / logo.width))))
+            printer.set(align="center")
+            printer.image(logo)
+            printer.text("\n")
+
+        # Header
+        print_line()
+        print_text("TAX INVOICE", align="center")
+        print_line()
+        print_text("Coffee Shop Co. L.L.C", align="center")
+        print_text("Shop 1, Block A", align="center")
+        print_text("Abraj Al Mamzar", align="center")
+        print_text("Dubai, UAE", align="center")
+        print_text("Ct: 0547606099 / 0559803445", align="center")
+        print_text("TRN: 104340270800001", align="center")
+        print_line()
+        print_text("Group Bill", align="center")
+        print_line()
+
+        # Invoice Details
+        invoice_no = payment if payment else "N/A"
+        order_ids = [str(order.id) for order in orders]
+        table_numbers = [
+            str(order.table.table_number) if order.table else "N/A" for order in orders
+        ]
+        halls = [str(order.hall) if order.hall else "N/A" for order in orders]
+        total_pax = sum(order.number_of_pax or 0 for order in orders)
+        earliest_check_in = min(order.created_at for order in orders)
+        earliest_shift = min(order.shift for order in orders)
+        total_discount = sum(
+            order.discount.value if order.discount else Decimal("0.00")
+            for order in orders
+        )
+
+        invoice_details = "\n".join(
+            [
+                "{:<25} {:<15}".format(
+                    f"Invoice No: {invoice_no}", f"Tables: ({'-'.join(table_numbers)})"
+                ),
+                "{:<25} {:<15}".format(
+                    f"Orders: ({'-'.join(order_ids)})", f"No Of Pax: {total_pax}"
+                ),
+                "{:<25}".format(f"Bill Date: {localtime().strftime('%d-%m-%Y')}"),
+                "{:<25} {:<15}".format(
+                    f"Check In:  {earliest_check_in.strftime('%H:%M')}",
+                    f"Check Out: {localtime().strftime('%H:%M')}",
+                ),
+                "{:<25} {:<15}".format(
+                    f"Halls: ({'-'.join(halls)}) ", f"Shift: {earliest_shift}"
+                ),
+            ]
+        )
+
+        print_text(invoice_details)
+        print_line()
+
+        # Table Header
+        print_text(
+            "{:<20} {:>4} {:>6} {:>6}".format("Item - UOM", "Qty", "Price", "Value")
+        )
+        print_text("-" * width)
+
+        # Aggregating item quantities across multiple orders
+        item_totals = {}
+
+        try:
+            for order in orders:
+                order_items = OrderItems.objects.filter(
+                    order=order, remaining_quantity__gt=0
+                )
+                for item in order_items:
+                    product_name = item.product.name
+                    product_name_ar = (
+                        item.product.name_ar.strip() if item.product.name_ar else ""
+                    )
+
+                    quantity = item.remaining_quantity
+                    price = item.product.price
+                    total = quantity * price
+
+                    # Store items by their English name as key
+                    if product_name in item_totals:
+                        item_totals[product_name]["quantity"] += quantity
+                        item_totals[product_name]["total"] += total
+                    else:
+                        item_totals[product_name] = {
+                            "quantity": quantity,
+                            "price": price,
+                            "total": total,
+                            "name_ar": product_name_ar,  # Ensure Arabic name is correctly stored
+                        }
+
+            # Print formatted items
+            for product_name, data in item_totals.items():
+                wrapped_product_name = textwrap.wrap(product_name, width=20)
+
+                # Print English name with quantity, price, and value
+                print_text(
+                    "{:<20} {:>4} {:>6.2f} {:>6.2f}".format(
+                        wrapped_product_name[0],
+                        data["quantity"],
+                        data["price"],
+                        data["total"],
+                    )
+                )
+
+                # Print remaining wrapped lines of the English name
+                for line in wrapped_product_name[1:]:
+                    print_text("{:<20}".format(line))
+
+                # Print Arabic name if available
+                if data["name_ar"]:
+                    arabic_image_bytes = arabic_text_to_image(
+                        data["name_ar"], arabic_font_path
+                    )
+                    arabic_image = Image.open(arabic_image_bytes)
+                    printer.image(arabic_image)
+
+        except Exception as e:
+            print(f"[ERROR] Item printing failed: {e}")
+
+        print_line()
+
+        # Totals
+        grand_total = total_payment_amount - total_discount
+
+        print_text(f"{'SubTotal:':<25} AED {total_payment_amount:7.2f}")
+        print_text(f"{'Discount:':<25} AED -{total_discount:6.2f}")
+        print_text(f"{'VAT (5%):':<25} AED {vat:7.2f}")
+        print_line()
+        print_text(f"{'Grand Total:':<25} AED {grand_total:7.2f}")
+        print_line()
+
+        # Collection Details
+        try:
+            payment_instance = Payment.objects.get(id=payment)
+            print_text("Collection Details", align="center")
+            print_text(f"Payment Method: {payment_instance.payment_method or 'N/A'}")
+        except Payment.DoesNotExist:
+            print_text("Collection Details", align="center")
+            print_text("Payment details not found.")
+        print_line()
+
+        # Closing Note
+        print_text("Thanks for your visit!", align="center")
+        print_text("Visit Again!", align="center")
+        print_line()
+
+        # Cut the paper
+        printer.cut()
+        printer.cashdraw(2)
+
+    except Exception as e:
+        print(f"[ERROR] Printer connection failed: {e}")
 
 
 def format_bill(order, payment, total_payment_amount, vat, save_as_pdf=False):
@@ -425,14 +968,9 @@ def split_format_bill(
     return formatted_bill_text, logo_path, pdf_url  # Return final formatted bill
 
 
-
-
-
-
 def group_format_bill(orders, payment, total_payment_amount, vat, save_as_pdf=False):
     from apps.order.models import Payment, OrderItems
     from django.utils.timezone import localtime
-
 
     bill_text = []
     width = 45  # Fixed width for formatting
@@ -453,21 +991,37 @@ def group_format_bill(orders, payment, total_payment_amount, vat, save_as_pdf=Fa
 
     # Aggregate order data
     order_ids = [str(order.id) for order in orders]
-    table_numbers = [str(order.table.table_number) if order.table else "N/A" for order in orders]
+    table_numbers = [
+        str(order.table.table_number) if order.table else "N/A" for order in orders
+    ]
     total_pax = sum(order.number_of_pax or 0 for order in orders)
     earliest_check_in = min(order.created_at for order in orders)
-    total_discount = sum(order.discount.value if order.discount else Decimal("0.00") for order in orders)
+    total_discount = sum(
+        order.discount.value if order.discount else Decimal("0.00") for order in orders
+    )
 
     # Invoice and Order Details (Aligned)
-    bill_text.append("{:<25} {:<25}".format(f"Invoice No: {payment}", f"Tables: ({'-'.join(table_numbers)})"))
-    bill_text.append("{:<25} {:<25}".format(f"Orders: ({'-'.join(order_ids)})", f"No Of Pax: {total_pax}"))
+    bill_text.append(
+        "{:<25} {:<25}".format(
+            f"Invoice No: {payment}", f"Tables: ({'-'.join(table_numbers)})"
+        )
+    )
+    bill_text.append(
+        "{:<25} {:<25}".format(
+            f"Orders: ({'-'.join(order_ids)})", f"No Of Pax: {total_pax}"
+        )
+    )
     bill_text.append("{:<25}".format(f"Bill Date: {localtime().strftime('%d-%m-%Y')}"))
-    bill_text.append("{:<25}".format(f"Check In:  {earliest_check_in.strftime('%H:%M:%S')}"))
+    bill_text.append(
+        "{:<25}".format(f"Check In:  {earliest_check_in.strftime('%H:%M:%S')}")
+    )
     bill_text.append("{:<25}".format(f"Check Out: {localtime().strftime('%H:%M:%S')}"))
     bill_text.append("=" * width)
 
     # Table Header (Aligned)
-    bill_text.append("{:<20} {:>5} {:>8} {:>8}".format("Item - UOM", "Qty", "Price", "Value"))
+    bill_text.append(
+        "{:<20} {:>5} {:>8} {:>8}".format("Item - UOM", "Qty", "Price", "Value")
+    )
     bill_text.append("-" * width)
 
     # Aggregating item quantities across multiple orders
@@ -490,7 +1044,7 @@ def group_format_bill(orders, payment, total_payment_amount, vat, save_as_pdf=Fa
                     "quantity": quantity,
                     "price": price,
                     "total": total,
-                    "name_ar": product_name_ar
+                    "name_ar": product_name_ar,
                 }
 
     # Print formatted items
@@ -499,9 +1053,11 @@ def group_format_bill(orders, payment, total_payment_amount, vat, save_as_pdf=Fa
         wrapped_product_name_ar = textwrap.wrap(data["name_ar"], width=20)
 
         # Print English name first with values
-        bill_text.append("{:<20} {:>5} {:>8} {:>8}".format(
-            wrapped_product_name[0], data["quantity"], data["price"], data["total"]
-        ))
+        bill_text.append(
+            "{:<20} {:>5} {:>8} {:>8}".format(
+                wrapped_product_name[0], data["quantity"], data["price"], data["total"]
+            )
+        )
 
         # Print additional wrapped English lines (if needed)
         for line in wrapped_product_name[1:]:
@@ -553,7 +1109,9 @@ def group_format_bill(orders, payment, total_payment_amount, vat, save_as_pdf=Fa
         if payment:
             filename = f"invoice_{payment}.pdf"
         else:
-            random_number = random.randint(100000, 999999)  # Generate a 6-digit random number
+            random_number = random.randint(
+                100000, 999999
+            )  # Generate a 6-digit random number
             filename = f"invoice_order_{order.id}_{random_number}.pdf"
         pdf_path, pdf_url = save_bill_as_pdf(formatted_bill_text, filename, logo_path)
 
@@ -613,7 +1171,7 @@ def save_bill_as_pdf(bill_text, filename, logo_path=None):
     # Write each line of the bill
     for line in bill_text.split("\n"):
         if any(
-            "\u0600" <= char <= "\u06FF" for char in line
+            "\u0600" <= char <= "\u06ff" for char in line
         ):  # Check if the line contains Arabic text
             reshaped_text = arabic_reshaper.reshape(line)  # Fix Arabic shaping
             formatted_line = get_display(reshaped_text)  # Apply RTL formatting
@@ -699,13 +1257,12 @@ def print_to_printer(printer_ip, bill_text, logo_path=None, simulate_terminal=Tr
 
         # ✅ Cut the paper & open cash drawer
         printer.cut()
-        printer.cashdraw(2)
+        # printer.cashdraw(2)
 
         print(f" Print job sent successfully to {printer_ip}")
 
     except Exception as e:
         print(f" Failed to print to {printer_ip}: {e}")
-
 
 
 def generate_report(source):
@@ -1160,6 +1717,10 @@ def print_report(report_data, report_type):
     try:
         from apps.printer.models import Printer
 
+        # from escpos.printer import Usb
+        # vid=0x1504
+        # pid=0x1F
+        # printer =Usb(vid,pid)
         # Get printer IP
         p = Printer.objects.filter(printer_type="cashier").first()
         printer_ip = p.ip_address
@@ -1188,40 +1749,60 @@ def print_report(report_data, report_type):
         print_line()
 
         # 2️ **Sales Summary**
-        print_left_right("Total Sales:", f"{report_data['total_sales']:.2f}")
-        print_left_right("Total Discounts:", f"{report_data['total_discounts']:.2f}")
-        print_left_right("Net Total:", f"{report_data['net_total']:.2f}")
+        print_centered("SALES SUMMARY", bold=True, size=1)
+        print_line()
+
+        printer.text(f"{'Total Sales':<15}{report_data['total_sales']:>15.2f}\n")
+        printer.text(
+            f"{'Total Discounts':<15}{report_data['total_discounts']:>15.2f}\n"
+        )
+        print_line()
+        printer.text(f"{'NET TOTAL':<15}{report_data['net_total']:>15.2f}\n")
         print_line()
 
         # 3️ **Collection Details**
         print_centered("COLLECTION DETAILS", bold=True, size=1)
-        print_left_right(
-            "CASH:", f"{report_data['collection_details']['cash_total']:.2f}"
+        printer.text(f"{'PAYMENT METHOD':<15}{'AMOUNT':>15}\n")
+        print_line()
+
+        printer.text(
+            f"{'CASH':<15}{report_data['collection_details']['cash_total']:>15.2f}\n"
         )
-        print_left_right(
-            "CARD:", f"{report_data['collection_details']['card_total']:.2f}"
+        printer.text(
+            f"{'CARD':<15}{report_data['collection_details']['card_total']:>15.2f}\n"
         )
         print_line()
-        print_left_right(
-            "TOTAL COLLECTION:",
-            f"{report_data['collection_details']['total_collection']:.2f}",
-            bold=True,
+
+        printer.text(
+            f"{'TOTAL COLLECTION':<15}{report_data['collection_details']['total_collection']:>15.2f}\n"
         )
         print_line()
 
         # 4️ **Tax Details**
         print_centered("TAX DETAILS", bold=True, size=1)
-        print_left_right("VAT:", f"{report_data['vat_collected']:.2f}")
+        printer.text(f"{'TAX TYPE':<15}{'AMOUNT':>15}\n")
+        print_line()
+
+        printer.text(f"{'VAT':<15}{report_data['vat_collected']:>15.2f}\n")
         print_line()
 
         # 5️ **Revenue Center Wise Collection**
+        # print_centered("REVENUE CENTER WISE COLLECTION", bold=True, size=1)
+        # for hall, revenue in report_data["revenue_by_hall"].items():
+        #     print_centered(hall.upper(), bold=True, size=1)
+        #     print_left_right("CASH:", f"{revenue['cash']:.2f}")
+        #     print_left_right("CARD:", f"{revenue['card']:.2f}")
+        #     print_left_right("TOTAL:", f"{revenue['total']:.2f}", bold=True)
+        #     print_line()
+        # 5️ **Revenue Center Wise Collection**
         print_centered("REVENUE CENTER WISE COLLECTION", bold=True, size=1)
+        printer.text(f"{'REVENUE CENTER':<15}{'CASH':>8}{'CARD':>8}{'TOTAL':>10}\n")
+
         for hall, revenue in report_data["revenue_by_hall"].items():
-            print_centered(hall.upper(), bold=True, size=1)
-            print_left_right("CASH:", f"{revenue['cash']:.2f}")
-            print_left_right("CARD:", f"{revenue['card']:.2f}")
-            print_left_right("TOTAL:", f"{revenue['total']:.2f}", bold=True)
-            print_line()
+            printer.text(
+                f"{hall.upper():<15}{revenue['cash']:>8.2f}{revenue['card']:>8.2f}{revenue['total']:>10.2f}\n"
+            )
+        print_line()
 
         # 6️ **Shift Wise Hall Pax Details**
         print_centered("SHIFT WISE HALL PAX DETAILS", bold=True, size=1)
@@ -1233,7 +1814,7 @@ def print_report(report_data, report_type):
                 printer.text(
                     f"{hall.upper():<15}{details['guests']:>8}{details['sales']:>10.2f}\n"
                 )
-
+            print_line()
             printer.text(
                 f"{'SHIFT TOTAL':<15}{sum(details['guests'] for details in halls.values()):>8}{sum(details['sales'] for details in halls.values()):>10.2f}\n"
             )
@@ -1746,7 +2327,12 @@ def print_sales_report(sales_report):
     from apps.printer.models import Printer
 
     try:
-        # Get cashier printer details
+        from escpos.printer import Usb
+
+        # vid=0x1504
+        # pid=0x1F
+        # printer =Usb(vid,pid)
+        # # Get cashier printer details
         p = Printer.objects.filter(printer_type="cashier").first()
         if not p:
             raise ValueError("No cashier printer found.")
@@ -1774,26 +2360,26 @@ def print_sales_report(sales_report):
 
             # 📌 Print Table Header (Aligned)
             printer.set(align="left", bold=True)
-            printer.text(f"{'BillNo':<6} {'P.Type':<7} {'Time':<8} {'Total':>7}\n")
-            printer.text("-" * 32 + "\n")
+            printer.text(f"{'BillNo':<8}{'P.Type':<10}{'Time':<10}{'Total':>10}\n")
+            printer.text("-" * 40 + "\n")  # Adjusted line width for 80mm paper
 
             # 📌 Print Transactions
             for txn in transactions:
-                bill_no = f"{txn['bill_no']:<6}"  # Left align (6 chars)
-                p_type = f"{txn['payment_type']:<7}"  # Left align (7 chars)
-                time = f"{txn['time']:<8}"  # Left align (8 chars)
+                bill_no = f"{txn['bill_no']:<8}"  # Left align (8 chars)
+                p_type = f"{txn['payment_type']:<10}"  # Left align (10 chars)
+                time = f"{txn['time']:<10}"  # Left align (10 chars)
                 total = (
-                    f"{txn['total']:>7.2f}"  # Right align (7 chars, 2 decimal places)
+                    f"{txn['total']:>10.2f}"  # Right align (10 chars, 2 decimal places)
                 )
 
                 printer.text(f"{bill_no}{p_type}{time}{total}\n")
                 total_per_center += txn["total"]
 
             # 📌 Print Totals per Revenue Center
-            printer.text("-" * 32 + "\n")
+            printer.text("-" * 40 + "\n")  # Adjusted width
             printer.set(align="left", bold=True)
             printer.text(
-                f"Total Bills: {bill_count:<5}  Total: {total_per_center:.2f}\n\n"
+                f"Total Bills: {bill_count:<5}  Total: {total_per_center:>10.2f}\n\n"
             )
 
         # 🏷️ Final Summary Separator

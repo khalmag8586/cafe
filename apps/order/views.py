@@ -45,10 +45,15 @@ from apps.category.models import Category
 from cafe.pagination import StandardResultsSetPagination
 from cafe.custom_permissions import HasPermissionOrInGroupWithPermission
 from cafe.util import (
+    # bills
+    print_bill_escpos,
+    print_split_bill_escpos,
+    print_group_bill_escpos,
     print_to_printer,
     format_bill,
     split_format_bill,
     group_format_bill,
+    # reports
     generate_report,  # for x and z reports
     generate_report_for_period,
     print_period_report,
@@ -842,8 +847,19 @@ class SplitBillView(generics.CreateAPIView):
                 cashier_printer = Printer.objects.filter(printer_type="cashier").first()
                 if cashier_printer:
                     try:
-                        print_to_printer(
-                            cashier_printer.ip_address, formatted_bill, logo_path
+                        # print_to_printer(
+                        #     cashier_printer.ip_address, formatted_bill, logo_path
+                        # )
+                        # print_bill_escpos(order,payment.id,grand_total,order.vat,cashier_printer.ip_address,logo_path)
+
+                        print_split_bill_escpos(
+                            order,
+                            payment.id,
+                            selected_items,
+                            total_payment_amount,
+                            vat,
+                            cashier_printer.ip_address,
+                            logo_path=logo_path,
                         )
                     except Exception as e:
                         print(f"Printing failed for order {order.id}: {e}")
@@ -855,7 +871,7 @@ class SplitBillView(generics.CreateAPIView):
             return Response(
                 {
                     "detail": _("Bill split successfully."),
-                    "formatted_bill": formatted_bill,
+                    # "formatted_bill": formatted_bill,
                     "pdf_path": request.build_absolute_uri(pdf_path),
                     "payment_id": payment.id,
                 },
@@ -942,7 +958,16 @@ class GenerateBillView(generics.RetrieveAPIView):
         cashier_printer = Printer.objects.filter(printer_type="cashier").first()
         if cashier_printer:
             try:
-                print_to_printer(cashier_printer.ip_address, formatted_bill, logo_path)
+                # print_to_printer(cashier_printer.ip_address, formatted_bill, logo_path)
+                print_bill_escpos(
+                    order,
+                    None,
+                    total_payment_amount,
+                    order.vat,
+                    cashier_printer.ip_address,
+                    logo_path=logo_path,
+                )
+
             except Exception as e:
                 print(f"Failed to print order {order.id}: {e}")
 
@@ -1073,7 +1098,15 @@ class CheckoutOrderView(generics.UpdateAPIView):
         cashier_printer = Printer.objects.filter(printer_type="cashier").first()
         if cashier_printer:
             try:
-                print_to_printer(cashier_printer.ip_address, formatted_bill, logo_path)
+                # print_to_printer(cashier_printer.ip_address, formatted_bill, logo_path)
+                print_bill_escpos(
+                    order,
+                    payment.id,
+                    grand_total,
+                    order.vat,
+                    cashier_printer.ip_address,
+                    logo_path=logo_path,
+                )
             except Exception as e:
                 print(f"Failed to print order {order.id}: {e}")
 
@@ -1189,6 +1222,23 @@ class GroupBillsView(generics.CreateAPIView):
                     orders, payment.id, total_payment_amount, vat, save_as_pdf=True
                 )
 
+                # Print the combined bill if a cashier printer exists
+                cashier_printer = Printer.objects.filter(printer_type="cashier").first()
+                if cashier_printer:
+                    try:
+                        # print_to_printer(
+                        #     cashier_printer.ip_address, formatted_bill, logo_path
+                        # )
+                        print_group_bill_escpos(
+                            orders,
+                            payment.id,
+                            total_payment_amount,
+                            vat,
+                            cashier_printer.ip_address,
+                            logo_path=logo_path,
+                        )
+                    except Exception as e:
+                        print(f"Failed to print group bill: {e}")
                 # Update all order items
                 for order in orders:
                     order_items = OrderItems.objects.filter(order=order)
@@ -1196,21 +1246,10 @@ class GroupBillsView(generics.CreateAPIView):
                         item.is_paid = True
                         item.remaining_quantity = 0
                         item.save()
-
-                # Print the combined bill if a cashier printer exists
-                cashier_printer = Printer.objects.filter(printer_type="cashier").first()
-                if cashier_printer:
-                    try:
-                        print_to_printer(
-                            cashier_printer.ip_address, formatted_bill, logo_path
-                        )
-                    except Exception as e:
-                        print(f"Failed to print group bill: {e}")
-
             return Response(
                 {
                     "detail": _("Group bills processed successfully."),
-                    "combined_bill": formatted_bill,
+                    # "combined_bill": formatted_bill,
                     "pdf_path": request.build_absolute_uri(pdf_path),
                     "logo": logo_path if logo_path else None,
                 },
@@ -1852,7 +1891,9 @@ class XReportForPeriodView(generics.GenericAPIView):
             report_data, report_type="X", date_range=(parsed_from_date, parsed_to_date)
         )
         # Print the report
-        print_result = print_period_report(report_data, report_type="X",start_date=from_date,end_date=to_date)
+        print_result = print_period_report(
+            report_data, report_type="X", start_date=from_date, end_date=to_date
+        )
 
         if isinstance(print_result, str) and print_result.startswith("Printing failed"):
             return Response(
