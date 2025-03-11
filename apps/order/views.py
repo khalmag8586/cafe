@@ -1088,12 +1088,6 @@ class CheckoutOrderView(generics.UpdateAPIView):
             order, payment.id, grand_total, order.vat, save_as_pdf=True
         )
 
-        # Update order items
-        for item in order_items:
-            item.is_paid = True
-            item.remaining_quantity = 0
-            item.save()
-
         # Print receipt if a cashier printer exists
         cashier_printer = Printer.objects.filter(printer_type="cashier").first()
         if cashier_printer:
@@ -1109,7 +1103,11 @@ class CheckoutOrderView(generics.UpdateAPIView):
                 )
             except Exception as e:
                 print(f"Failed to print order {order.id}: {e}")
-
+        # Update order items
+        for item in order_items:
+            item.is_paid = True
+            item.remaining_quantity = 0
+            item.save()
         response_data = {
             "detail": _("Order checked out and payment recorded successfully."),
             "bill": formatted_bill,
